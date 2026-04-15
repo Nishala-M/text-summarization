@@ -48,7 +48,7 @@ LENGTH_SETTINGS = {
 }
 OUTPUT_CAPS      = {"Short": 80,  "Medium": 150, "Detailed": 280}
 INPUT_WORD_LIMIT = {"Short": 120, "Medium": 150, "Detailed": 200}
-MAX_NEW_TOKENS   = {"Short": 80, "Medium": 160, "Detailed": 220}
+MAX_NEW_TOKENS   = {"Short": 60, "Medium": 100, "Detailed": 140}
 
 MAX_CLEAN_WORDS      = 8000
 MAX_SENTS_EXTRACTIVE = 300
@@ -857,7 +857,7 @@ def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_
     mnt      = MAX_NEW_TOKENS.get(length_choice, 300)
     inp      = ("summarize: " + text) if model_choice == "T5" else text
     try:
-        enc = tokenizer(inp, return_tensors="pt", max_length=256,
+        enc = tokenizer(inp, return_tensors="pt", max_length=192,
                         truncation=True, padding=False)
         enc = {k: v.to("cpu") for k, v in enc.items()}
         with torch.no_grad():
