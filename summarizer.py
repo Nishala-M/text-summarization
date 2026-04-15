@@ -265,26 +265,6 @@ def is_academic_noise(s: str) -> bool:
 # MODEL LOADING
 # ═════════════════════════════════════════════════════════════════════════════
 
-def load_bart():
-    try:
-        tok = BartTokenizer.from_pretrained(BART_PATH)
-        mod = AutoModelForSeq2SeqLM.from_pretrained(BART_PATH, torch_dtype=torch.float32)
-        mod.eval()
-        return tok, _quantize(mod)
-    except Exception as e:
-        print(f"[ERROR] BART load failed: {e}")
-        return None, None
-
-
-def load_t5():
-    try:
-        tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
-        mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH, torch_dtype=torch.float32)
-        mod.eval()
-        return tok, _quantize(mod)
-    except Exception as e:
-        print(f"[ERROR] T5 load failed: {e}")
-        return None, None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
