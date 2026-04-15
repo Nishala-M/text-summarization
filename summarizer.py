@@ -44,9 +44,9 @@ T5_FOLDER_ID   = "1gFOAZ5Ypn_kDEHzGKUApJrbq_g_VuuFK"
 LENGTH_SETTINGS = {
     "Short":    {"min_length": 30,  "max_length": 80},
     "Medium":   {"min_length": 80,  "max_length": 150},
-    "Detailed": {"min_length": 150, "max_length": 280},
+    "Detailed": {"min_length": 130, "max_length": 160},
 }
-OUTPUT_CAPS      = {"Short": 80,  "Medium": 150, "Detailed": 280}
+OUTPUT_CAPS      = {"Short": 80,  "Medium": 150, "Detailed": 160}
 INPUT_WORD_LIMIT = {"Short": 120, "Medium": 150, "Detailed": 200}
 MAX_NEW_TOKENS   = {"Short": 60, "Medium": 100, "Detailed": 120}
 
@@ -969,7 +969,7 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
         elif ext:               final = ext
         else:                   final = ai_out or ""
 
-    if length_choice == "Detailed" and len(final.split()) < 150:
+    if length_choice == "Detailed" and len(final.split()) < 130:
         pool = [s.strip() for s in _sent_tok(cleaned)
                 if len(s.split()) >= 8 and not _is_bad_sentence(s.strip())
                 and s.split()[0].lower().rstrip(",") not in _BAD_START]
