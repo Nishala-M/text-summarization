@@ -1,5 +1,5 @@
 # app.py
-# Professional AI Text Summarizer — Single Column Layout
+# Professional AI Text Summarizer — with Multilingual Support
 
 import streamlit as st
 import pdfplumber
@@ -7,6 +7,14 @@ import time
 import io
 from summarizer import load_bart, load_t5, generate_summary
 from explainability import get_important_sentences
+from translator import (
+    is_available as translation_available,
+    detect_language,
+    get_language_name,
+    translate_to_english,
+    translate_from_english,
+    SUPPORTED_LANGUAGES,
+)
 
 st.set_page_config(
     page_title="SummarAI — Intelligent Text Summarizer",
@@ -34,7 +42,6 @@ st.markdown("""
     --shadow2:  0 4px 24px rgba(79,70,229,0.16);
 }
 
-/* ══ FORCE LIGHT MODE ══ */
 html, body,
 .stApp, .stApp > div,
 [data-testid="stAppViewContainer"],
@@ -80,7 +87,6 @@ html, body, [class*="css"] {
 #MainMenu, footer, header { visibility: hidden; }
 .stDeployButton { display: none; }
 
-/* ── Hero ── */
 .hero {
     text-align: center;
     padding: 2.8rem 1rem 1.8rem;
@@ -122,7 +128,6 @@ html, body, [class*="css"] {
 }
 .stat-pill span { color:var(--accent); font-weight:600; }
 
-/* ── Section titles ── */
 .card-title {
     font-family:'Syne',sans-serif; font-size:.68rem; font-weight:700;
     letter-spacing:.14em; text-transform:uppercase; color:var(--muted);
@@ -133,7 +138,6 @@ html, body, [class*="css"] {
     background:var(--accent); border-radius:2px;
 }
 
-/* ── INPUT WRAPPER ── */
 .input-wrapper {
     background: #ffffff;
     border: 1.5px solid var(--border);
@@ -143,7 +147,6 @@ html, body, [class*="css"] {
     margin-bottom: .8rem;
 }
 
-/* ── Tabs ── */
 .stTabs [data-baseweb="tab-list"] {
     background: var(--bg3) !important;
     border-radius: 9px !important;
@@ -179,7 +182,6 @@ html, body, [class*="css"] {
 .stTabs [aria-selected="true"] div { color: white !important; }
 .stTabs [data-baseweb="tab-panel"] { padding-top: 1rem !important; }
 
-/* ── Textarea ── */
 .stTextArea textarea {
     background: #fafbff !important;
     border: 1.5px solid var(--border) !important;
@@ -202,7 +204,6 @@ html, body, [class*="css"] {
 [data-baseweb="textarea"],
 [data-baseweb="base-input"] { border: none !important; box-shadow: none !important; }
 
-/* ── Generate button ── */
 .stButton > button {
     background: linear-gradient(135deg, var(--accent), #6d64f5) !important;
     color: #ffffff !important;
@@ -228,7 +229,6 @@ html, body, [class*="css"] {
 }
 .stButton > button p, .stButton > button span, .stButton > button div { color: #ffffff !important; }
 
-/* ── Clear button ── */
 .btn-clear .stButton > button {
     background: #fff0f0 !important;
     color: #ef4444 !important;
@@ -256,7 +256,6 @@ div[data-testid="stButton"] {
     justify-content: center !important;
 }
 
-/* ── Selectbox ── */
 .stSelectbox > div > div {
     background: #ffffff !important;
     border: 1.5px solid var(--border) !important;
@@ -265,7 +264,6 @@ div[data-testid="stButton"] {
     box-shadow: var(--shadow) !important;
 }
 
-/* ── File Uploader ── */
 [data-testid="stFileUploader"] {
     background: #fafbff !important;
     border: 2px dashed var(--border) !important;
@@ -273,7 +271,6 @@ div[data-testid="stButton"] {
 }
 [data-testid="stFileUploader"]:hover { border-color: var(--accent) !important; }
 
-/* ── Result Box ── */
 .result-box {
     background: linear-gradient(135deg, rgba(79,70,229,.06), rgba(5,150,105,.04));
     border: 1.5px solid rgba(79,70,229,.2);
@@ -287,7 +284,6 @@ div[data-testid="stButton"] {
 }
 .result-text { font-size: .97rem; line-height: 1.85; color: var(--text); }
 
-/* ── Stats chips ── */
 .stats-bar { display: flex; gap: .8rem; flex-wrap: wrap; margin-top: .8rem; }
 .stat-chip {
     background: #ffffff;
@@ -297,7 +293,6 @@ div[data-testid="stButton"] {
 }
 .stat-chip b { color: var(--accent3); }
 
-/* ── Key sentences ── */
 .explain-box {
     background: #ffffff;
     border: 1px solid var(--border);
@@ -316,7 +311,6 @@ div[data-testid="stButton"] {
     text-transform: uppercase;
 }
 
-/* ── Model badges ── */
 .model-badge {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 3px 10px; border-radius: 6px;
@@ -328,7 +322,6 @@ div[data-testid="stButton"] {
 .badge-ok   { background:rgba(5,150,105,.12); color:var(--accent3); border:1px solid rgba(5,150,105,.3); }
 .badge-err  { background:rgba(232,69,138,.12); color:var(--accent2); border:1px solid rgba(232,69,138,.3); }
 
-/* ── Sidebar ── */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #e8eaf6 0%, #eceef8 100%) !important;
     border-right: 1px solid var(--border) !important;
@@ -336,14 +329,12 @@ section[data-testid="stSidebar"] {
 }
 section[data-testid="stSidebar"] .block-container { padding: 1.5rem 1rem !important; }
 
-/* ── Progress ── */
 .stProgress > div > div {
     background: linear-gradient(90deg, var(--accent), var(--accent2)) !important;
     border-radius: 50px !important;
 }
 .stProgress > div { background: var(--bg3) !important; border-radius: 50px !important; }
 
-/* ── Expander ── */
 .streamlit-expanderHeader {
     background: #ffffff !important; border-radius: 10px !important;
     border: 1px solid var(--border) !important; font-size: .85rem !important;
@@ -354,7 +345,6 @@ section[data-testid="stSidebar"] .block-container { padding: 1.5rem 1rem !import
     border-top: none !important; border-radius: 0 0 10px 10px !important;
 }
 
-/* ── Download button — same style as Generate, wider ── */
 [data-testid="stDownloadButton"] > button {
     background: linear-gradient(135deg, #4f46e5, #6d64f5) !important;
     color: #ffffff !important;
@@ -392,14 +382,11 @@ div[data-testid="stDownloadButton"] {
     justify-content: center !important;
 }
 
-/* ── Section divider ── */
 .sec-div {
     height: 1px;
     background: linear-gradient(90deg, transparent, var(--border), transparent);
     margin: 2rem 0;
 }
-
-/* ── Summary section wrapper ── */
 .summary-section {
     background: linear-gradient(135deg, rgba(79,70,229,.04), rgba(232,69,138,.02));
     border: 1px solid rgba(79,70,229,.1);
@@ -407,8 +394,6 @@ div[data-testid="stDownloadButton"] {
     padding: 1.4rem 1.6rem;
     margin-bottom: 1rem;
 }
-
-/* ── Key sentences section wrapper ── */
 .keysent-section {
     background: linear-gradient(135deg, rgba(5,150,105,.04), rgba(79,70,229,.02));
     border: 1px solid rgba(5,150,105,.12);
@@ -416,8 +401,6 @@ div[data-testid="stDownloadButton"] {
     padding: 1.4rem 1.6rem;
     margin-bottom: 1rem;
 }
-
-/* ── Empty state ── */
 .empty-state {
     text-align: center;
     padding: 3.5rem 2rem;
@@ -434,7 +417,6 @@ div[data-testid="stDownloadButton"] {
 .empty-sub   { font-size: .8rem; line-height: 1.7; color: #9ca8c8; }
 .empty-sub b { color: var(--accent); opacity: .7; }
 
-/* ── Info cards ── */
 .info-card {
     background: #ffffff;
     border: 1px solid var(--border);
@@ -458,8 +440,6 @@ div[data-testid="stDownloadButton"] {
 .info-card .tag-green {
     background: rgba(5,150,105,.09); color: var(--accent3);
 }
-
-/* ── How-to steps ── */
 .step-row {
     display: flex; align-items: flex-start; gap: 12px;
     padding: .65rem .9rem;
@@ -478,7 +458,16 @@ div[data-testid="stDownloadButton"] {
 .step-text { font-size: .85rem; color: var(--text); line-height: 1.6; }
 .step-text b { color: var(--accent); }
 
-/* ── Scrollbar ── */
+/* ── Translation banner ── */
+.trans-banner {
+    background: linear-gradient(135deg,rgba(79,70,229,.07),rgba(232,69,138,.04));
+    border: 1px solid rgba(79,70,229,.2);
+    border-radius: 10px; padding: .7rem 1.1rem;
+    font-size: .82rem; color: var(--muted); margin-bottom: .8rem;
+    display: flex; align-items: center; gap: 8px;
+}
+.trans-banner b { color: var(--accent); }
+
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg3); }
 ::-webkit-scrollbar-thumb { background: #b0b8d8; border-radius: 3px; }
@@ -490,7 +479,8 @@ hr { border-color: var(--border) !important; }
 
 # ── Session State ──────────────────────────────────────────────────────────────
 for k, v in [("history", []), ("last_summary", ""), ("last_input", ""),
-             ("total_runs", 0), ("total_reduced", 0)]:
+             ("total_runs", 0), ("total_reduced", 0),
+             ("last_detected_lang", "en"), ("last_output_lang", "en")]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -540,6 +530,34 @@ with st.sidebar:
     show_explain  = st.toggle("Show Key Sentences", value=True)
     show_history  = st.toggle("Show History Panel", value=True)
 
+    # ── Translation settings ───────────────────────────────────────────────
+    st.markdown("<hr style='border-color:#c8cde8; margin:1.2rem 0'>", unsafe_allow_html=True)
+    st.markdown('<div class="card-title">🌐 Translation</div>', unsafe_allow_html=True)
+
+    if translation_available():
+        auto_detect = st.toggle("Auto-detect Input Language", value=True)
+        lang_names  = list(SUPPORTED_LANGUAGES.keys())
+        output_lang = st.selectbox(
+            "Output Summary Language",
+            lang_names,
+            index=0,
+            help="The language your summary will be returned in."
+        )
+        st.markdown(
+            '<div style="font-size:.74rem;color:#9ca3af;margin-top:.3rem;">'
+            'Auto-detect translates non-English input to English before summarizing, '
+            'then returns the result in your chosen output language.</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        auto_detect = False
+        output_lang = "English"
+        st.markdown(
+            '<div style="font-size:.78rem;color:#e8458a;">⚠ Translation unavailable.<br>'
+            'Install: <code>deep-translator langdetect</code></div>',
+            unsafe_allow_html=True
+        )
+
     st.markdown("<hr style='border-color:#c8cde8; margin:1.2rem 0'>", unsafe_allow_html=True)
     st.markdown('<div class="card-title">📊 Session Stats</div>', unsafe_allow_html=True)
     avg = round(st.session_state.total_reduced / st.session_state.total_runs) \
@@ -568,16 +586,17 @@ with st.sidebar:
 # ══════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="hero">
-    <div class="hero-badge">✦ AI-Powered · Explainable · Multi-Model</div>
+    <div class="hero-badge">✦ AI-Powered · Multilingual · Explainable · Multi-Model</div>
     <div class="hero-title">Summarize Any Text,<br>Instantly</div>
     <div class="hero-sub">
         Powered by BART &amp; T5 transformers. Paste text or upload a PDF —
-        get clean, accurate summaries in seconds.
+        get clean, accurate summaries in seconds. Supports 8 languages.
     </div>
     <div class="hero-divider"></div>
     <div class="stats-row">
         <div class="stat-pill">⚡ <span>Fast</span> Single-pass</div>
         <div class="stat-pill">🧠 <span>2</span> AI Models</div>
+        <div class="stat-pill">🌐 <span>8</span> Languages</div>
         <div class="stat-pill">📄 <span>Any</span> Document type</div>
         <div class="stat-pill">🔍 <span>Explainable</span> Output</div>
     </div>
@@ -586,7 +605,7 @@ st.markdown("""
 
 
 # ══════════════════════════════════════════════════════════════
-#  ★ NEW — ABOUT THE MODELS SECTION
+#  ABOUT THE MODELS
 # ══════════════════════════════════════════════════════════════
 with st.expander("🧠  About the AI Models & How to Use", expanded=False):
     st.markdown("""
@@ -596,7 +615,6 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
     """, unsafe_allow_html=True)
 
     col1, col2 = st.columns(2, gap="medium")
-
     with col1:
         st.markdown("""
         <div class='info-card'>
@@ -616,7 +634,6 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
             </div>
         </div>
         """, unsafe_allow_html=True)
-
     with col2:
         st.markdown("""
         <div class='info-card'>
@@ -668,18 +685,18 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
             <p style='margin-top:.5rem;'>Use when you need <b>full coverage</b> of all key topics.</p>
         </div>
         """, unsafe_allow_html=True)
-
     st.markdown("</div>", unsafe_allow_html=True)
+
     st.markdown("<div style='margin-top:1.2rem;'>", unsafe_allow_html=True)
     st.markdown("<div class='card-title'>How to Use SummarAI</div>", unsafe_allow_html=True)
-
     steps = [
         ("1", "Choose your <b>AI Model</b> (BART or T5) from the sidebar on the left."),
         ("2", "Select your <b>Summary Length</b> — Short, Medium, or Detailed."),
-        ("3", "Paste your text in the <b>Paste Text</b> tab, or switch to <b>Upload PDF</b> to upload a file."),
-        ("4", "Click <b>✦ Generate Summary</b> to create your summary."),
-        ("5", "Read the <b>Summary</b> output and check the <b>Key Source Sentences</b> to see which parts of your text were most important."),
-        ("6", "Click <b>⬇ Download Summary</b> to save the result as a .txt file."),
+        ("3", "Toggle <b>Auto-detect Input Language</b> on to support non-English text."),
+        ("4", "Paste your text in the <b>Paste Text</b> tab, or switch to <b>Upload PDF</b>."),
+        ("5", "Click <b>✦ Generate Summary</b> to create your summary."),
+        ("6", "Check <b>Key Source Sentences</b> to see which parts were most important."),
+        ("7", "Click <b>⬇ Download Summary</b> to save the result as a .txt file."),
     ]
     for num, text in steps:
         st.markdown(f"""
@@ -688,10 +705,8 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
             <div class='step-text'>{text}</div>
         </div>
         """, unsafe_allow_html=True)
-
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # Tips box
     st.markdown("""
     <div style='background:rgba(79,70,229,.05); border:1px solid rgba(79,70,229,.15);
                 border-radius:12px; padding:1rem 1.3rem; margin-top:1rem;'>
@@ -703,6 +718,7 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
             ✦ &nbsp;For <b>research papers</b>, use BART + Detailed mode<br>
             ✦ &nbsp;For <b>news articles</b>, BART + Medium gives the cleanest output<br>
             ✦ &nbsp;For <b>emails or blog posts</b>, T5 + Short is fastest<br>
+            ✦ &nbsp;For <b>Tamil / Hindi text</b>, enable Auto-detect + set Output Language<br>
             ✦ &nbsp;Toggle <b>Key Sentences OFF</b> in sidebar for a cleaner view<br>
             ✦ &nbsp;Use <b>History panel</b> to compare BART vs T5 outputs side by side
         </div>
@@ -719,13 +735,12 @@ st.markdown('<div class="card-title">📥 Input</div>', unsafe_allow_html=True)
 input_text = ""
 
 st.markdown('<div class="input-wrapper">', unsafe_allow_html=True)
-
 tab_text, tab_pdf = st.tabs(["✏  Paste Text", "📄  Upload PDF"])
 
 with tab_text:
     txt = st.text_area(
         "Input text", height=300,
-        placeholder="Paste your article, report, research paper or any text here...",
+        placeholder="Paste your article, report, research paper or any text here... (any language supported)",
         label_visibility="hidden"
     )
     if txt.strip():
@@ -766,10 +781,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown("""
 <style>
 div[data-testid="stButton"] { display: flex !important; justify-content: center !important; }
-.btn-group { display:flex; flex-direction:column; align-items:center; gap:0; margin:0.5rem 0; }
-.btn-group div[data-testid="stButton"] > button { width: 260px !important; }
 </style>
-<div class="btn-group">
 """, unsafe_allow_html=True)
 
 _, btn_col, _ = st.columns([1, 2, 1])
@@ -779,16 +791,16 @@ with btn_col:
     clr_btn = st.button("✕  Clear", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
-
 if clr_btn:
-    st.session_state.last_summary = ""
-    st.session_state.last_input   = ""
+    st.session_state.last_summary      = ""
+    st.session_state.last_input        = ""
+    st.session_state.last_detected_lang = "en"
+    st.session_state.last_output_lang  = "en"
     st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════
-#  RUN SUMMARIZATION
+#  RUN SUMMARIZATION  (with optional translation pipeline)
 # ══════════════════════════════════════════════════════════════
 if run_btn:
     if not input_text or not input_text.strip():
@@ -800,29 +812,66 @@ if run_btn:
             st.error(f"{model_choice} model failed to load. Please restart.")
         else:
             prog = st.progress(0)
+
+            # ── Step 1: Language detection ─────────────────────────────
+            detected_lang  = "en"
+            translated_in  = input_text
+            did_translate_in = False
+
+            if translation_available() and auto_detect:
+                with st.spinner("Detecting language..."):
+                    detected_lang = detect_language(input_text)
+                    lang_name = get_language_name(detected_lang)
+                    if detected_lang != "en":
+                        with st.spinner(f"Translating {lang_name} → English..."):
+                            translated_in, did_translate_in = translate_to_english(
+                                input_text, detected_lang
+                            )
+
+            prog.progress(20)
+
+            # ── Step 2: Summarise (always in English) ──────────────────
             with st.spinner(f"Summarizing with {model_choice}..."):
-                for i in range(50):
-                    time.sleep(0.008)
-                    prog.progress(i + 1)
-                summary = generate_summary(
-                    input_text, tok, mod, model_choice, length_choice
+                for i in range(20, 70):
+                    time.sleep(0.005)
+                    prog.progress(i)
+                summary_en = generate_summary(
+                    translated_in, tok, mod, model_choice, length_choice
                 )
-                for i in range(50, 100):
-                    time.sleep(0.004)
-                    prog.progress(i + 1)
+                prog.progress(70)
+
+            # ── Step 3: Translate output if requested ──────────────────
+            out_lang_code = SUPPORTED_LANGUAGES.get(output_lang, "en")
+            final_summary = summary_en
+            did_translate_out = False
+
+            if translation_available() and out_lang_code != "en":
+                with st.spinner(f"Translating summary → {output_lang}..."):
+                    final_summary = translate_from_english(summary_en, out_lang_code)
+                    did_translate_out = True
+
+            for i in range(70, 100):
+                time.sleep(0.003)
+                prog.progress(i)
             prog.empty()
 
+            # ── Update state ───────────────────────────────────────────
             in_wc  = len(input_text.split())
-            out_wc = len(summary.split())
+            out_wc = len(final_summary.split())
             pct    = round((1 - out_wc / max(in_wc, 1)) * 100)
 
-            st.session_state.last_summary  = summary
-            st.session_state.last_input    = input_text
-            st.session_state.total_runs   += 1
-            st.session_state.total_reduced += pct
+            st.session_state.last_summary       = final_summary
+            st.session_state.last_input         = translated_in   # English version for key-sentences
+            st.session_state.last_detected_lang = detected_lang
+            st.session_state.last_output_lang   = out_lang_code
+            st.session_state.total_runs        += 1
+            st.session_state.total_reduced     += pct
             st.session_state.history.insert(0, {
                 "model": model_choice, "length": length_choice,
-                "in_wc": in_wc, "out_wc": out_wc, "pct": pct, "full": summary
+                "in_wc": in_wc, "out_wc": out_wc, "pct": pct,
+                "full": final_summary,
+                "lang_in":  get_language_name(detected_lang),
+                "lang_out": output_lang,
             })
             if len(st.session_state.history) > 6:
                 st.session_state.history.pop()
@@ -830,7 +879,7 @@ if run_btn:
 
 
 # ══════════════════════════════════════════════════════════════
-#  ② SUMMARY
+#  ② SUMMARY OUTPUT
 # ══════════════════════════════════════════════════════════════
 if st.session_state.last_summary:
 
@@ -840,9 +889,20 @@ if st.session_state.last_summary:
     pct     = round((1 - out_wc / max(in_wc, 1)) * 100)
 
     st.markdown('<div class="sec-div"></div>', unsafe_allow_html=True)
-
     st.markdown('<div class="summary-section">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">📤 Summary</div>', unsafe_allow_html=True)
+
+    # ── Translation info banner ────────────────────────────────
+    detected_lang = st.session_state.last_detected_lang
+    output_lang_code = st.session_state.last_output_lang
+    if detected_lang != "en" or output_lang_code != "en":
+        lang_in_name  = get_language_name(detected_lang)
+        lang_out_name = get_language_name(output_lang_code)
+        st.markdown(f"""
+        <div class="trans-banner">
+            🌐 <b>Translation Pipeline:</b>
+            Input: {lang_in_name} → English (summarized) → {lang_out_name} (output)
+        </div>""", unsafe_allow_html=True)
 
     badge = "badge-bart" if model_choice == "BART" else "badge-t5"
     st.markdown(
@@ -859,6 +919,7 @@ if st.session_state.last_summary:
         <div class="stat-chip">📥 Input <b>{in_wc:,}</b> words</div>
         <div class="stat-chip">📤 Output <b>{out_wc}</b> words</div>
         <div class="stat-chip">📉 Reduced by <b>{pct}%</b></div>
+        <div class="stat-chip">🌐 Output: <b>{get_language_name(output_lang_code)}</b></div>
     </div>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -872,7 +933,7 @@ if st.session_state.last_summary:
         )
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ── KEY SENTENCES ─────────────────────────────────────────
+    # ── Key Sentences (always from English source) ────────────
     if show_explain:
         st.markdown('<div class="sec-div"></div>', unsafe_allow_html=True)
         st.markdown('<div class="keysent-section">', unsafe_allow_html=True)
@@ -896,15 +957,18 @@ if st.session_state.last_summary:
             pass
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── HISTORY ───────────────────────────────────────────────
+    # ── History ───────────────────────────────────────────────
     if show_history and st.session_state.history:
         st.markdown('<div class="sec-div"></div>', unsafe_allow_html=True)
         st.markdown('<div class="card-title">🕘 Recent Summaries</div>',
                     unsafe_allow_html=True)
         for i, h in enumerate(st.session_state.history):
+            lang_tag = f" · {h.get('lang_in','EN')}→{h.get('lang_out','EN')}" \
+                       if h.get('lang_in','English') != 'English' \
+                       or h.get('lang_out','English') != 'English' else ""
             with st.expander(
                 f"#{i+1}  {h['model']} · {h['length']} · "
-                f"{h['in_wc']:,} → {h['out_wc']} words  ({h['pct']}% reduced)"
+                f"{h['in_wc']:,} → {h['out_wc']} words  ({h['pct']}% reduced){lang_tag}"
             ):
                 st.markdown(
                     f'<div style="font-size:.88rem;line-height:1.75;color:#1a1d2e;padding:.2rem 0">'
@@ -935,7 +999,7 @@ st.markdown("""
             border-top:1px solid #c8cde8;'>
     <div style='font-family:Syne,sans-serif; font-size:.68rem; font-weight:700;
                 letter-spacing:.15em; text-transform:uppercase; color:#a0a8c8;'>
-        SummarAI · BART + T5 Transformers · Built with Streamlit
+        SummarAI · BART + T5 Transformers · Multilingual · Built with Streamlit
     </div>
 </div>
 """, unsafe_allow_html=True)
