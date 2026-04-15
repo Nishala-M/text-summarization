@@ -14,7 +14,7 @@ from transformers import BartTokenizer, T5Tokenizer, AutoModelForSeq2SeqLM
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-nltk.download("punkt_tab", quiet=True)
+nltk.download("punkt", quiet=True)
 #nltk.download("punkt",     quiet=True)
 #nltk.download("punkt_tab", quiet=True)
 
@@ -25,31 +25,35 @@ try:
     torch.set_num_interop_threads(max(1, _cpu // 2))
 except RuntimeError:
     pass
-import gdown
 
 # Google Drive folder IDs
 BART_FOLDER_ID = "1nQQGRPtI5R_96nZ9JTwWLsg3-icKB2we"
 T5_FOLDER_ID   = "1gFOAZ5Ypn_kDEHzGKUApJrbq_g_VuuFK"
 
-# Download BART model if not exists
-if not os.path.exists("my_bart_model"):
-    gdown.download_folder(
-        id=BART_FOLDER_ID,
-        output="my_bart_model",
-        quiet=False
-    )
-
-# Download T5 model if not exists
-if not os.path.exists("my_t5_model"):
-    gdown.download_folder(
-        id=T5_FOLDER_ID,
-        output="my_t5_model",
-        quiet=False
-    )
 
 BART_PATH = "my_bart_model"
 T5_PATH = "my_t5_model"
 # ── Model paths ───────────────────────────────────────────────────────────────
+def load_bart():
+    tok = BartTokenizer.from_pretrained(BART_PATH)
+    mod = AutoModelForSeq2SeqLM.from_pretrained(BART_PATH)
+    mod.eval()
+    return tok, mod
+
+
+def load_t5():
+    tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
+    mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH)
+    mod.eval()
+    return tok, mod
+
+# ── FIX ADDED: safe quantization fallback (prevents crash on older torch builds)
+def _quantize(model):
+    try:
+        return torch.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8)
+    except Exception:
+        return model
 
 # ── Length config ─────────────────────────────────────────────────────────────
 LENGTH_SETTINGS = {
@@ -147,28 +151,11 @@ _COMMON_VERBS = {
 _TRIVIAL = {"of", "and", "the", "a", "an", "in", "to", "for",
             "with", "by", "at", "or", "its", "their", "from"}
 
-
 # ═════════════════════════════════════════════════════════════════════════════
 # TITLE-MERGE DETECTOR
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _has_title_merge(s: str) -> bool:
-    """
-    Detect sentences where a document section title has been concatenated
-    directly onto the first sentence of the section body with no period.
-
-    Observed examples:
-      "The Psychology of Human Behaviour and Decision Human behaviour is…"
-      "Motivation and the Science of Wellbeing Understanding what motivates…"
-      "God through spatial grandeur and artistic richness, and stand as…"
-
-    Strategy:
-      Walk forward building a 'title prefix' of consecutive Title-Case words
-      and trivial connectors.  The prefix ends when we hit a lower-case
-      content word.  If after ≥ 3 Title-Case words the *next* word is also
-      capitalised (new sentence start) AND the prefix contains no verb
-      (real prose has a verb; a title doesn't), we conclude it is a merge.
-    """
     words = s.split()
     if len(words) < 8:
         return False
@@ -186,21 +173,16 @@ def _has_title_merge(s: str) -> bool:
         if clean[0].isupper():
             title_count += 1
         elif clean[0].islower():
-            # Lower-case content word — prefix has ended
             break
 
-        # Once we have ≥ 3 Title-Case words, check the very next word
         if title_count >= 3 and i + 1 < len(words):
             nxt_clean = re.sub(r"[^a-zA-Z]", "", words[i + 1])
             if nxt_clean and nxt_clean[0].isupper() and nxt_clean.lower() not in _TRIVIAL:
-                # Verify the prefix has no verb (a title won't)
                 prefix_words = [re.sub(r"[^a-z]", "", w2.lower())
                                 for w2 in words[:i + 1]]
                 if not any(pw in _COMMON_VERBS for pw in prefix_words):
                     return True
 
-    # Secondary guard: sentence starts with a lone word that has no verb
-    # in the first four words (fragment opener, e.g. "God through…")
     if len(words) >= 6:
         first_clean = re.sub(r"[^a-zA-Z]", "", words[0])
         if (first_clean and first_clean[0].isupper()
@@ -241,11 +223,6 @@ def is_academic_noise(s: str) -> bool:
 # ═════════════════════════════════════════════════════════════════════════════
 # MODEL LOADING
 # ═════════════════════════════════════════════════════════════════════════════
-
-def _quantize(model):
-    return torch.quantization.quantize_dynamic(
-        model, {torch.nn.Linear}, dtype=torch.qint8)
-
 
 def load_bart():
     try:
@@ -290,11 +267,10 @@ def has_metadata(t: str) -> bool:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SENTENCE QUALITY FILTER  (must be defined before all callers)
+# SENTENCE QUALITY FILTER
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _is_bad_sentence(s: str) -> bool:
-    """Return True when a sentence is unsuitable for any summary output."""
     s = s.strip()
     w = s.split()
 
@@ -338,7 +314,6 @@ def _is_bad_sentence(s: str) -> bool:
     if re.search(r",\s+[A-Z][a-z]{3,}\.?\s*$", s) and len(w) < 20:
         return True
 
-    # Reject title-merged sentences (the primary remaining issue)
     if _has_title_merge(s):
         return True
 
@@ -388,7 +363,6 @@ def _is_header(line: str) -> bool:
 
 
 def clean_input(text: str, short_input: bool = False) -> str:
-    """Clean text for summarization — removes headers, metadata, noise."""
     if is_research_paper(text):
         text = re.sub(r'\s*\[\d+\]\s*', ' ', text)
         text = re.sub(r'\b[A-Z]\.-?[A-Z]\.\s+[A-Z][a-z]+', '', text)
@@ -444,6 +418,7 @@ def clean_input(text: str, short_input: bool = False) -> str:
         r"\b\w*(?:ical|tional|sional|ational|logical|nological|"
         r"graphical|metrical|nautical|nomical|litical|sotical|"
         r"tectural|ectural|ultural|ructural)\s*$", re.IGNORECASE)
+
     merged = []
     for i, line in enumerate(kept):
         if i == 0:
@@ -457,8 +432,8 @@ def clean_input(text: str, short_input: bool = False) -> str:
             if last_word in _DANGLING or _RE_OPEN_MOD.search(last_word):
                 merged[-1] = merged[-1].rstrip().rstrip(",:;") + "."
         merged.append(line)
-    text = " ".join(merged)
 
+    text = " ".join(merged)
     text = _RE_HYPHEN.sub("", text)
     text = _RE_WS.sub(" ", text)
     text = _RE_NONASCII.sub(" ", text)
@@ -470,11 +445,10 @@ def clean_input(text: str, short_input: bool = False) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SMART TRIM  (zone-based)
+# SMART TRIM
 # ═════════════════════════════════════════════════════════════════════════════
 
 def smart_trim(text: str, length_choice: str) -> str:
-    """Zone-based sentence selection covering the whole document."""
     limit = INPUT_WORD_LIMIT.get(length_choice, 150)
     words = text.split()
     if len(words) <= limit:
@@ -485,6 +459,7 @@ def smart_trim(text: str, length_choice: str) -> str:
                  if len(s.split()) >= 6 and not _is_bad_sentence(s.strip())]
         if not sents:
             return " ".join(words[:limit])
+
         n = len(sents)
         try:
             vec    = TfidfVectorizer(stop_words="english")
@@ -495,7 +470,8 @@ def smart_trim(text: str, length_choice: str) -> str:
 
         n_zones = max(4, min(12, limit // 20))
         zone_sz = max(1, n // n_zones)
-        picked: set = set()
+        picked = set()
+
         for z in range(n_zones):
             start = z * zone_sz
             end   = min(n, start + zone_sz) if z < n_zones - 1 else n
@@ -504,7 +480,7 @@ def smart_trim(text: str, length_choice: str) -> str:
             best = max(range(start, end), key=lambda i: scores[i])
             picked.add(best)
 
-        result: list = []
+        result = []
         wc = 0
         for idx in sorted(picked):
             sw = len(sents[idx].split())
@@ -512,19 +488,6 @@ def smart_trim(text: str, length_choice: str) -> str:
                 break
             result.append(sents[idx])
             wc += sw
-
-        if wc < limit * 0.80:
-            unused = sorted([i for i in range(n) if i not in picked],
-                            key=lambda i: scores[i], reverse=True)
-            for idx in unused:
-                sw = len(sents[idx].split())
-                if wc + sw > int(limit * 1.10):
-                    continue
-                result.append(sents[idx])
-                wc += sw
-                if wc >= limit * 0.90:
-                    break
-            result.sort(key=lambda s: sents.index(s))
 
         return " ".join(result) if result else " ".join(words[:limit])
     except Exception:
@@ -551,8 +514,8 @@ def _dedup(text: str) -> str:
         "but", "also", "can", "will", "may",
     }
     sents = _sent_tok(text)
-    kept: list = []
-    ks:   list = []
+    kept, ks = [], []
+
     for s in sents:
         s = s.strip()
         if not s:
@@ -571,14 +534,15 @@ def _dedup(text: str) -> str:
         if not dup:
             kept.append(s)
             ks.append((w, c))
+
     return " ".join(kept)
 
 
 def _cap(text: str, max_w: int, strict: bool = False) -> str:
     sents = _sent_tok(text)
-    out:  list = []
-    n     = 0
+    out, n = [], 0
     grace = 0 if strict else min(8, int(max_w * 0.05))
+
     for s in sents:
         s = s.strip()
         if not s:
@@ -592,13 +556,10 @@ def _cap(text: str, max_w: int, strict: bool = False) -> str:
         elif n + wc <= max_w + grace:
             out.append(s)
             n += wc
-            if n >= max_w:
-                break
         else:
             break
-    if out:
-        return " ".join(out)
-    return " ".join(text.split()[:max_w])
+
+    return " ".join(out) if out else " ".join(text.split()[:max_w])
 
 
 def _ensure_complete_sentences(text: str) -> str:
@@ -607,10 +568,12 @@ def _ensure_complete_sentences(text: str) -> str:
         return text
     if text[-1] in '.!?"\'':
         return text
-    sents    = _sent_tok(text)
+
+    sents = _sent_tok(text)
     complete = [s.strip() for s in sents if s.strip() and s.strip()[-1] in ".!?"]
     if complete:
         return " ".join(complete)
+
     return text.rstrip(",;: ") + "."
 
 
@@ -635,62 +598,23 @@ def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> s
                  if len(s.split()) >= 8
                  and not _is_bad_sentence(s.strip())
                  and s.split()[0].lower().rstrip(",") not in _BAD_START]
-        if not sents:
-            sents = [s.strip() for s in _sent_tok(text) if len(s.split()) >= 5]
+
         if not sents:
             return ""
-        if len(sents) <= top_n:
-            return " ".join(sents)
 
-        if len(sents) > MAX_SENTS_EXTRACTIVE:
-            def _prescore(s):
-                alpha = sum(1 for c in s if c.isalpha())
-                total = max(len(s.replace(" ", "")), 1)
-                return min(len(s.split()), 40) / 40.0 * 0.5 + (alpha / total) * 0.5
-            scored   = sorted(enumerate(sents), key=lambda x: _prescore(x[1]), reverse=True)
-            keep_idx = {i for i, _ in scored[:MAX_SENTS_EXTRACTIVE]}
-            sents    = [s for i, s in enumerate(sents) if i in keep_idx]
-
-        vec    = TfidfVectorizer(stop_words="english")
-        tfidf  = vec.fit_transform(sents)
+        vec = TfidfVectorizer(stop_words="english")
+        tfidf = vec.fit_transform(sents)
         scores = cosine_similarity(tfidf, tfidf).sum(axis=1)
-        _S2    = {"the", "a", "an", "is", "are", "was", "of", "in",
-                  "to", "and", "or", "it", "for", "with"}
 
-        if zone_based:
-            n       = len(sents)
-            zone_sz = max(1, n // top_n)
-            kept:   list = []
-            kept_w: list = []
-            for z in range(top_n):
-                start = z * zone_sz
-                end   = min(n, start + zone_sz) if z < top_n - 1 else n
-                if start >= n:
-                    break
-                best = max(range(start, end), key=lambda i: scores[i])
-                sw   = set(sents[best].lower().split()) - _S2
-                if not any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.60
-                           for ew in kept_w):
-                    kept.append(best)
-                    kept_w.append(sw)
-            return " ".join(sents[i] for i in sorted(kept)) if kept else ""
-        else:
-            kept: list = []
-            ks:   list = []
-            for idx in np.argsort(scores)[::-1]:
-                if len(kept) >= top_n:
-                    break
-                s = sents[idx]
-                w = set(s.lower().split())
-                c = w - _S2
-                if not any(len(w & ew) / max(len(w), len(ew)) >= 0.60
-                           for ew, _ in ks):
-                    kept.append(idx)
-                    ks.append((w, c))
-            return " ".join(sents[i] for i in sorted(kept))
+        kept = []
+        for idx in np.argsort(scores)[::-1]:
+            if len(kept) >= top_n:
+                break
+            kept.append(idx)
 
-    except Exception as exc:
-        print(f"[WARN] extractive_summary: {exc}")
+        return " ".join(sents[i] for i in sorted(kept))
+
+    except Exception:
         return ""
 
 
@@ -705,53 +629,74 @@ def _is_hallucinated(text: str) -> bool:
     n = len(w)
     if n < 8:
         return False
+
     score = 0
     ur = len(set(w)) / n
-    if ur < 0.45:     score += 3
-    elif ur < 0.55:   score += 1
+    if ur < 0.45:
+        score += 3
+    elif ur < 0.55:
+        score += 1
+
     cd = sum(1 for i in range(n - 1) if w[i] == w[i + 1])
-    if cd >= 2:   score += 3
-    elif cd >= 1: score += 2
+    if cd >= 2:
+        score += 3
+    elif cd >= 1:
+        score += 2
+
     sw = sum(1 for x in w if len(x) <= 2) / n
-    if sw > 0.35:     score += 3
-    elif sw > 0.28:   score += 2
+    if sw > 0.35:
+        score += 3
+    elif sw > 0.28:
+        score += 2
+
     tg = [tuple(w[i:i + 3]) for i in range(n - 2)]
     if tg:
         mr = max(tg.count(t) for t in set(tg))
-        if mr >= 3:   score += 3
-        elif mr >= 2: score += 1
+        if mr >= 3:
+            score += 3
+        elif mr >= 2:
+            score += 1
+
     clean = [re.sub(r"[^a-z]", "", x) for x in w]
-    freq  = Counter(x for x in clean if len(x) > 4)
+    freq = Counter(x for x in clean if len(x) > 4)
     limit = 3 if n < 50 else 4
     if any(cnt >= limit for cnt in freq.values()):
         return True
+
     return score >= 2
 
 
 def _fix_output(text: str) -> str:
     text = re.sub(r"^summarize\s*:\s*", "", text.strip(), flags=re.IGNORECASE)
-    exp  = {"AI":  "Artificial Intelligence", "ML":  "Machine Learning",
-            "NLP": "Natural Language Processing", "DL": "Deep Learning"}
+    exp  = {"AI": "Artificial Intelligence",
+            "ML": "Machine Learning",
+            "NLP": "Natural Language Processing",
+            "DL": "Deep Learning"}
+
     m = _RE_ACRONYM.match(text)
     if m and m.group(2) in exp:
         text = _RE_ACRONYM.sub(exp[m.group(2)] + " (" + m.group(2) + ")", text, count=1)
+
     return text[0].upper() + text[1:] if text and text[0].islower() else text
 
 
-def _ai_generate(
-    text: str, tokenizer, model,
-    model_choice: str, min_len: int, max_len: int, length_choice: str,
-) -> str:
+def _ai_generate(text, tokenizer, model, model_choice,
+                 min_len, max_len, length_choice):
+
     if not text.strip():
         return ""
-    wc       = len(text.split())
+
+    wc = len(text.split())
     safe_min = min(min_len, max(10, wc // 3))
-    mnt      = MAX_NEW_TOKENS.get(length_choice, 300)
-    inp      = ("summarize: " + text) if model_choice == "T5" else text
+    mnt = MAX_NEW_TOKENS.get(length_choice, 300)
+
+    inp = ("summarize: " + text) if model_choice == "T5" else text
+
     try:
         enc = tokenizer(inp, return_tensors="pt", max_length=512,
                         truncation=True, padding=False)
         enc = {k: v.to("cpu") for k, v in enc.items()}
+
         with torch.no_grad():
             out = model.generate(
                 enc["input_ids"],
@@ -765,247 +710,125 @@ def _ai_generate(
                 length_penalty=1.0,
                 repetition_penalty=1.2,
             )
+
         raw = tokenizer.decode(
             out[0], skip_special_tokens=True,
             clean_up_tokenization_spaces=True,
         ).strip()
+
         return _enforce_sentence_end(raw)
+
     except Exception as exc:
         print(f"[ERROR] AI generation: {exc}")
         return ""
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SHORT MODE  (dedicated zone-based pipeline)
+# SHORT MODE
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _short_summary(cleaned: str, out_cap: int) -> str:
-    """3–4 sentence summary from 4 document zones, no AI model calls."""
     try:
         sents = _sent_tok(cleaned)
         sents = [s.strip() for s in sents
                  if len(s.split()) >= 8
                  and not _is_bad_sentence(s.strip())
                  and s.split()[0].lower().rstrip(",") not in _BAD_START]
-        if not sents:
-            sents = [s.strip() for s in _sent_tok(cleaned) if len(s.split()) >= 6]
+
         if not sents:
             return " ".join(cleaned.split()[:out_cap])
 
-        n_zones = 4
-        if len(sents) <= n_zones:
-            result = _dedup(" ".join(sents))
-            result = _cap(result, out_cap, strict=True)
-            result = _ensure_complete_sentences(result)
-            result = _RE_WS.sub(" ", result).strip()
-            return (result[0].upper() + result[1:]
-                    if result and not result[0].isupper() else result)
+        if len(sents) <= 4:
+            return _cap(" ".join(sents), out_cap, strict=True)
 
-        try:
-            vec    = TfidfVectorizer(stop_words="english")
-            tfidf  = vec.fit_transform(sents)
-            scores = cosine_similarity(tfidf, tfidf).sum(axis=1)
-        except Exception:
-            scores = np.array([min(len(s.split()), 30) for s in sents], dtype=float)
+        vec = TfidfVectorizer(stop_words="english")
+        tfidf = vec.fit_transform(sents)
+        scores = cosine_similarity(tfidf, tfidf).sum(axis=1)
 
-        n       = len(sents)
-        zone_sz = max(1, n // n_zones)
-        _STOP   = {"the", "a", "an", "is", "are", "was", "of", "in",
-                   "to", "and", "or", "it", "for", "with"}
-        picked:   list = []
-        picked_w: list = []
+        n = len(sents)
+        zone_sz = max(1, n // 4)
 
-        for z in range(n_zones):
+        picked = []
+        for z in range(4):
             start = z * zone_sz
-            end   = min(n, start + zone_sz) if z < n_zones - 1 else n
+            end = min(n, start + zone_sz)
             if start >= n:
                 break
-            ideal = [i for i in range(start, end)
-                     if 12 <= len(sents[i].split()) <= 25]
-            cands = ideal if ideal else list(range(start, end))
-            cands = sorted(cands, key=lambda i: scores[i], reverse=True)
-            for idx in cands:
-                sw = set(sents[idx].lower().split()) - _STOP
-                if any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.55
-                       for ew in picked_w):
-                    continue
-                picked.append(idx)
-                picked_w.append(sw)
-                break
-
-        if len(picked) < 2:
-            for idx in np.argsort(scores)[::-1]:
-                if len(picked) >= n_zones:
-                    break
-                sw = set(sents[idx].lower().split()) - _STOP
-                if not any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.55
-                           for ew in picked_w):
-                    picked.append(idx)
-                    picked_w.append(sw)
+            best = max(range(start, end), key=lambda i: scores[i])
+            picked.append(best)
 
         result = " ".join(sents[i] for i in sorted(picked))
-        result = _dedup(result)
         result = _cap(result, out_cap, strict=True)
         result = _ensure_complete_sentences(result)
-        result = _RE_WS.sub(" ", result).strip()
-        return (result[0].upper() + result[1:]
-                if result and not result[0].isupper() else result)
+        return result
 
-    except Exception as exc:
-        print(f"[WARN] _short_summary: {exc}")
-        ext   = extractive_summary(cleaned, top_n=4, zone_based=True)
-        final = ext or " ".join(cleaned.split()[:out_cap])
-        return _cap(final, out_cap, strict=True)
+    except Exception:
+        return _cap(cleaned, out_cap, strict=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY POINT
 # ═════════════════════════════════════════════════════════════════════════════
 
-def generate_summary(
-    input_text:    str,
-    tokenizer,
-    model,
-    model_choice:  str,
-    length_choice: str,
-) -> str:
+def generate_summary(input_text, tokenizer, model,
+                     model_choice, length_choice):
+
     if not input_text or not input_text.strip():
         return "Please enter some text to summarize."
     if tokenizer is None or model is None:
         return "Model not loaded. Please restart the app."
 
-    raw_wc  = len(input_text.split())
+    raw_wc = len(input_text.split())
     cleaned = clean_input(input_text, short_input=raw_wc < 120)
-    if len(cleaned.split()) < 8:
-        cleaned = _RE_WS.sub(" ", input_text).strip()
+
     if len(cleaned.split()) < 5:
         return "Text too short. Please provide more content."
 
-    cw = cleaned.split()
-    if len(cw) > MAX_CLEAN_WORDS:
-        n   = MAX_CLEAN_WORDS
-        n_s = int(n * 0.40)
-        n_e = int(n * 0.20)
-        n_m = n - n_s - n_e
-        mid = len(cw) // 2
-        cleaned = " ".join(
-            cw[:n_s] + cw[mid - n_m // 2: mid + n_m // 2] + cw[len(cw) - n_e:])
+    wc = len(cleaned.split())
 
-    wc   = len(cleaned.split())
-    cfg  = LENGTH_SETTINGS[length_choice]
+    cfg = LENGTH_SETTINGS[length_choice]
     base = OUTPUT_CAPS[length_choice]
 
     if wc < 100:
         out_cap = max(25, int(wc * 0.50))
     elif wc < 200:
-        ratios  = {"Short": 0.55, "Medium": 0.65, "Detailed": 0.75}
-        mins    = {"Short": 40,   "Medium": 70,   "Detailed": 100}
+        ratios = {"Short": 0.55, "Medium": 0.65, "Detailed": 0.75}
+        mins = {"Short": 40, "Medium": 70, "Detailed": 100}
         out_cap = min(base, max(mins[length_choice], int(wc * ratios[length_choice])))
     else:
         out_cap = base
 
-    ext_top = 3 if wc < 200 else (5 if wc < 500 else (8 if wc < 1500 else 12))
+    ext_top = 3 if wc < 200 else (5 if wc < 500 else 8)
 
-    # ── SHORT ──────────────────────────────────────────────────────────────────
     if length_choice == "Short":
         return _short_summary(cleaned, out_cap)
 
-    # ── MEDIUM & DETAILED ──────────────────────────────────────────────────────
     trimmed = smart_trim(cleaned, length_choice)
+
     raw_out = _ai_generate(trimmed, tokenizer, model, model_choice,
                            cfg["min_length"], cfg["max_length"], length_choice)
-    ai_out  = _filter_output(_fix_output(raw_out)) if raw_out else ""
-    if not ai_out and raw_out:
-        ai_out = _fix_output(raw_out)
+
+    ai_out = _filter_output(_fix_output(raw_out)) if raw_out else ""
+
     if _is_hallucinated(ai_out):
         ai_out = ""
-    if ai_out and wc > 250 and len(ai_out.split()) > 0.65 * wc:
+
+    ext = extractive_summary(cleaned, top_n=ext_top)
+
+    if ai_out and len(ai_out.split()) > 0.65 * wc:
         ai_out = ""
 
-    ai_wc   = len(ai_out.split()) if ai_out else 0
-    ext     = extractive_summary(cleaned, top_n=ext_top)
-    tgt_min = (int(wc * 0.45) if wc < 200
-               else {"Medium": 80, "Detailed": 150}[length_choice])
-
-    if ai_wc >= tgt_min:
-        if length_choice == "Detailed":
-            ai_sents = [set(x.lower().split()) for x in _sent_tok(ai_out)]
-            extras:  list = []
-            cur_wc = ai_wc
-            for x in (_sent_tok(ext) if ext else []):
-                if cur_wc >= out_cap:
-                    break
-                x   = x.strip()
-                xw  = set(x.lower().split())
-                xwc = len(x.split())
-                if cur_wc + xwc > out_cap:
-                    continue
-                if (not any(len(xw & ew) / max(len(xw), len(ew)) >= 0.55
-                            for ew in ai_sents)
-                        and not _is_bad_sentence(x)):
-                    ai_sents.append(xw)
-                    extras.append(x)
-                    cur_wc += xwc
-                    if len(extras) >= 6:
-                        break
-            final = (ai_out + " " + " ".join(extras)).strip() if extras else ai_out
-        else:
-            final = ai_out
+    if ai_out:
+        final = ai_out
     else:
-        base_t   = ai_out if ai_wc >= 12 else ""
-        ai_sents = ([set(x.lower().split()) for x in _sent_tok(base_t)]
-                    if base_t else [])
-        extras:  list = []
-        cur_wc = ai_wc if base_t else 0
-        for x in (_sent_tok(ext) if ext else []):
-            if cur_wc >= out_cap:
-                break
-            x  = x.strip()
-            xw = set(x.lower().split())
-            if (not any(len(xw & ew) / max(len(xw), len(ew)) >= 0.55
-                        for ew in ai_sents if ew)
-                    and not _is_bad_sentence(x)):
-                ai_sents.append(xw)
-                extras.append(x)
-                cur_wc += len(x.split())
-        if base_t and extras:
-            final = base_t + " " + " ".join(extras)
-        elif extras:
-            final = " ".join(extras)
-        elif base_t:
-            final = base_t
-        elif ext:
-            final = ext
-        else:
-            final = ai_out or ""
+        final = ext
 
-    if length_choice == "Detailed" and len(final.split()) < 150:
-        pool = [s.strip() for s in _sent_tok(cleaned)
-                if len(s.split()) >= 8
-                and not _is_bad_sentence(s.strip())
-                and s.split()[0].lower().rstrip(",") not in _BAD_START]
-        existing = set(final.lower().split())
-        for x in pool:
-            if len(final.split()) >= out_cap:
-                break
-            xw = set(x.lower().split())
-            if (len(xw & existing) / max(len(xw), 1) < 0.75
-                    and not _is_bad_sentence(x)):
-                final = final + " " + x
-                existing.update(xw)
-
-    if not final or not final.strip():
-        return "Could not generate a summary. Please try with more text."
-
-    final = _filter_output(final)
-    if not final.strip():
-        final = ext or ai_out or ""
-    if not final.strip():
-        return "Could not generate a summary. Please try with more text."
+    if not final:
+        final = _cap(cleaned, out_cap, strict=False)
 
     final = _dedup(final)
     final = _cap(final, out_cap, strict=False)
     final = _ensure_complete_sentences(final)
     final = _RE_WS.sub(" ", final).strip()
-    return (final[0].upper() + final[1:]
-            if final and not final[0].isupper() else final)
+
+    return final[0].upper() + final[1:] if final and not final[0].isupper() else final
