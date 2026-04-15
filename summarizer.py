@@ -205,22 +205,35 @@ def _quantize(model):
 
 def load_bart():
     try:
-        _download_model_folder(BART_FOLDER_ID, BART_PATH)
+        success = _download_model_folder(BART_FOLDER_ID, BART_PATH)
+
+        # ✅ IMPORTANT CHECK
+        if not success or not _is_model_ready(BART_PATH):
+            print("[ERROR] BART model files missing or incomplete.")
+            return None, None
+
         tok = BartTokenizer.from_pretrained(BART_PATH)
         mod = AutoModelForSeq2SeqLM.from_pretrained(BART_PATH, torch_dtype=torch.float32)
         mod.eval()
         return tok, _quantize(mod)
+
     except Exception as e:
         print(f"[ERROR] BART load failed: {e}")
         return None, None
-
 def load_t5():
     try:
-        _download_model_folder(T5_FOLDER_ID, T5_PATH)
+        success = _download_model_folder(T5_FOLDER_ID, T5_PATH)
+
+        # ✅ IMPORTANT CHECK
+        if not success or not _is_model_ready(T5_PATH):
+            print("[ERROR] T5 model files missing or incomplete.")
+            return None, None
+
         tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
         mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH, torch_dtype=torch.float32)
         mod.eval()
         return tok, _quantize(mod)
+
     except Exception as e:
         print(f"[ERROR] T5 load failed: {e}")
         return None, None
