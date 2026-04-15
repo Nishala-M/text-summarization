@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# ML models (VERY IMPORTANT)
+my_bart_model/
+my_t5_model/
+
+# data files (optional but recommended)
+student_data.csv
+test_summaries.csv
