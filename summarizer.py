@@ -14,6 +14,7 @@ from transformers import BartTokenizer, T5Tokenizer, AutoModelForSeq2SeqLM
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+import gdown
 nltk.download("punkt", quiet=True)
 #nltk.download("punkt",     quiet=True)
 #nltk.download("punkt_tab", quiet=True)
@@ -33,19 +34,59 @@ T5_FOLDER_ID   = "1gFOAZ5Ypn_kDEHzGKUApJrbq_g_VuuFK"
 
 BART_PATH = "my_bart_model"
 T5_PATH = "my_t5_model"
+def _download_and_extract(folder_id, output_path):
+    if os.path.exists(output_path) and os.listdir(output_path):
+        return  # already exists
+
+    print(f"[INFO] Downloading model to {output_path}...")
+
+    url = f"https://drive.google.com/uc?id={folder_id}"
+    zip_path = output_path + ".zip"
+
+    try:
+        gdown.download(url, zip_path, quiet=False)
+
+        import zipfile
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(output_path)
+
+        os.remove(zip_path)
+        print(f"[INFO] Model ready at {output_path}")
+
+    except Exception as e:
+        print(f"[ERROR] Download failed: {e}")
 # ── Model paths ───────────────────────────────────────────────────────────────
 def load_bart():
-    tok = BartTokenizer.from_pretrained(BART_PATH)
-    mod = AutoModelForSeq2SeqLM.from_pretrained(BART_PATH)
-    mod.eval()
-    return tok, mod
+    try:
+        _download_and_extract(BART_FOLDER_ID, BART_PATH)
 
+        tok = BartTokenizer.from_pretrained(BART_PATH)
+        mod = AutoModelForSeq2SeqLM.from_pretrained(
+            BART_PATH, torch_dtype=torch.float32
+        )
+
+        mod.eval()
+        return tok, _quantize(mod)
+
+    except Exception as e:
+        print(f"[ERROR] BART load failed: {e}")
+        return None, None
 
 def load_t5():
-    tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
-    mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH)
-    mod.eval()
-    return tok, mod
+    try:
+        _download_and_extract(T5_FOLDER_ID, T5_PATH)
+
+        tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
+        mod = AutoModelForSeq2SeqLM.from_pretrained(
+            T5_PATH, torch_dtype=torch.float32
+        )
+
+        mod.eval()
+        return tok, _quantize(mod)
+
+    except Exception as e:
+        print(f"[ERROR] T5 load failed: {e}")
+        return None, None
 
 # ── FIX ADDED: safe quantization fallback (prevents crash on older torch builds)
 def _quantize(model):
