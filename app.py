@@ -17,7 +17,20 @@ from translator import (
     translate_from_english,
     translate_to_english,
 )
+import os
+import gdown
 
+BART_FOLDER_ID = "1nQQGRPtI5R_96nZ9JTwWLsg3-icKB2we"
+T5_FOLDER_ID   = "1gFOAZ5Ypn_kDEHzGKUApJrbq_g_VuuFK"
+
+if not os.path.exists("my_bart_model"):
+    gdown.download_folder(id=BART_FOLDER_ID, output="my_bart_model", quiet=False)
+
+if not os.path.exists("my_t5_model"):
+    gdown.download_folder(id=T5_FOLDER_ID, output="my_t5_model", quiet=False)
+
+BART_PATH = "my_bart_model"
+T5_PATH = "my_t5_model"
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="SummarAI — Intelligent Text Summarizer",
