@@ -35,7 +35,7 @@ def is_available():
     return TRANSLATION_AVAILABLE
 
 
-def detect_language(text):
+def detect_language(text: str) -> str:
     """
     Detect the language of input text.
     Returns a BCP-47 language code string (e.g. 'en', 'ta', 'de').
@@ -54,12 +54,12 @@ def detect_language(text):
         return "en"
 
 
-def get_language_name(code):
+def get_language_name(code: str) -> str:
     """Return the display name for a language code, or the code itself if unknown."""
     return CODE_TO_NAME.get(code, code.upper())
 
 
-def translate_to_english(text, source_lang):
+def translate_to_english(text: str, source_lang: str):
     """
     Translate text from source_lang to English.
 
@@ -96,7 +96,7 @@ def translate_to_english(text, source_lang):
         return text, False
 
 
-def translate_from_english(text, target_lang):
+def translate_from_english(text: str, target_lang: str) -> str:
     """
     Translate an English summary to target_lang.
 
@@ -131,7 +131,7 @@ def translate_from_english(text, target_lang):
         return text   # return English on failure — better than empty
 
 
-def _split_into_chunks(text, max_chars=3800):
+def _split_into_chunks(text: str, max_chars: int = 3800) -> list:
     """
     Split text into chunks ≤ max_chars without breaking sentences.
     Tries to split at sentence boundaries ('. '), then word boundaries (' ').
@@ -141,7 +141,7 @@ def _split_into_chunks(text, max_chars=3800):
     if len(text) <= max_chars:
         return [text]
 
-    chunks = []
+    chunks    = []
     remaining = text.strip()
 
     while remaining:
@@ -152,14 +152,12 @@ def _split_into_chunks(text, max_chars=3800):
         # Try to split at last sentence boundary within limit
         split_at = remaining.rfind(". ", 0, max_chars)
         if split_at != -1:
-            # Include the period in the chunk
-            split_at += 1
+            split_at += 1   # include the period
         else:
             # Fall back to last word boundary
             split_at = remaining.rfind(" ", 0, max_chars)
         if split_at == -1 or split_at == 0:
-            # No boundary found — hard split
-            split_at = max_chars
+            split_at = max_chars  # hard split as last resort
 
         chunk     = remaining[:split_at].strip()
         remaining = remaining[split_at:].strip()
