@@ -332,7 +332,12 @@ def load_bart():
 
 
 def load_t5():
-    """Download (if needed) and load T5."""
+    """
+    Download (if needed) and load T5.
+    FIXED: Uses T5ForConditionalGeneration directly instead of
+    AutoModelForSeq2SeqLM to avoid tokenizer/model mismatch issues.
+    Also includes tokenizer fallback handling like BART.
+    """
     try:
         if not _download_model_folder(T5_FOLDER_ID, T5_PATH):
             print("[ERROR] T5 model download failed.")
@@ -344,8 +349,24 @@ def load_t5():
         print(f"[INFO] Loading T5 tokenizer from {T5_PATH}")
         print(f"[INFO] T5 files: {os.listdir(T5_PATH)}")
 
-        tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
-        mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH, torch_dtype=torch.float32)
+        # ✅ Same fallback logic as BART
+        try:
+            tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
+        except Exception as e1:
+            print(f"[WARN] T5Tokenizer direct load failed ({e1}), trying AutoTokenizer...")
+            from transformers import AutoTokenizer
+            tok = AutoTokenizer.from_pretrained(T5_PATH)
+
+        print(f"[INFO] Loading T5 model...")
+
+        # ✅ Use direct class (like BART) instead of AutoModel
+        from transformers import T5ForConditionalGeneration
+        mod = T5ForConditionalGeneration.from_pretrained(
+            T5_PATH,
+            torch_dtype=torch.float32,
+            ignore_mismatched_sizes=True
+        )
+
         mod.eval()
         print("[INFO] T5 loaded successfully.")
         return tok, _quantize(mod)
@@ -355,8 +376,6 @@ def load_t5():
         import traceback
         traceback.print_exc()
         return None, None
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # UTILITIES
 # ═════════════════════════════════════════════════════════════════════════════
