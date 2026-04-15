@@ -14,9 +14,9 @@ from transformers import BartTokenizer, T5Tokenizer, AutoModelForSeq2SeqLM
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-
-nltk.download("punkt",     quiet=True)
 nltk.download("punkt_tab", quiet=True)
+#nltk.download("punkt",     quiet=True)
+#nltk.download("punkt_tab", quiet=True)
 
 # ── CPU threading ─────────────────────────────────────────────────────────────
 _cpu = os.cpu_count() or 4
