@@ -15,7 +15,8 @@ import torch
 from collections import Counter
 from transformers import (
     BartTokenizer, BartForConditionalGeneration,
-    T5Tokenizer, AutoModelForSeq2SeqLM
+    T5Tokenizer, T5ForConditionalGeneration,
+    AutoModelForSeq2SeqLM, AutoTokenizer
 )
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -176,100 +177,81 @@ def _has_title_merge(s: str) -> bool:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _is_model_ready(path: str) -> bool:
-    """Return True only when config.json AND a weights file are present at the path root."""
+    """Return True only when config.json AND a weights file exist at path root."""
     if not os.path.isdir(path):
         return False
     files = os.listdir(path)
-    has_config  = "config.json" in files
-    has_weights = "model.safetensors" in files or "pytorch_model.bin" in files
-    return has_config and has_weights
+    return "config.json" in files and (
+        "model.safetensors" in files or "pytorch_model.bin" in files)
+
+
+def _get_model_type(path: str) -> str:
+    """
+    Read config.json to determine the actual model_type stored in the folder.
+    Returns 'bart', 't5', or 'unknown'.
+    """
+    import json
+    config_path = os.path.join(path, "config.json")
+    try:
+        with open(config_path) as f:
+            cfg = json.load(f)
+        return cfg.get("model_type", "unknown").lower()
+    except Exception:
+        return "unknown"
 
 
 def _find_model_root(search_dir: str) -> str | None:
     """
-    Walk search_dir to find the directory that contains BOTH
-    config.json AND a weights file (model.safetensors / pytorch_model.bin).
-
-    FIX: Previously the code picked the FIRST subdirectory containing
-    config.json, which was often a checkpoint subfolder (checkpoint-675)
-    whose tokenizer_config belonged to a different model class (T5 vs BART).
-    The actual model files live at the root of the downloaded folder.
-
-    Priority order:
-    1. search_dir itself (root level) — preferred
-    2. Deepest subdirectory with both config + weights
+    Find the directory containing BOTH config.json AND model weights.
+    Checks root first, then subfolders. Returns shortest path (closest to root).
     """
-    # Check root first
     if _is_model_ready(search_dir):
         return search_dir
-
-    # Walk subdirectories, prefer those with weights files
     candidates = []
     for root, dirs, files in os.walk(search_dir):
-        # Skip checkpoint-only directories (no weights)
-        has_config  = "config.json" in files
-        has_weights = "model.safetensors" in files or "pytorch_model.bin" in files
-        if has_config and has_weights:
+        if "config.json" in files and (
+                "model.safetensors" in files or "pytorch_model.bin" in files):
             candidates.append(root)
-
     if not candidates:
         return None
-
-    # Prefer the shortest path (closest to root = most likely the real model)
     candidates.sort(key=lambda p: len(p))
     return candidates[0]
 
 
 def _download_model_folder(folder_id: str, output_path: str) -> bool:
-    """
-    Download a Google Drive folder with gdown.download_folder.
-    FIXED: Uses _find_model_root() to locate the actual model files
-    regardless of the Drive folder's internal subfolder structure.
-    """
+    """Download Google Drive folder. Finds actual model root after download."""
     if _is_model_ready(output_path):
         print(f"[INFO] Model already present at {output_path}")
         return True
 
     print(f"[INFO] Downloading model {folder_id} → {output_path} ...")
     tmp_dir = output_path + "_tmp_dl"
-
     try:
         if os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir)
         os.makedirs(tmp_dir, exist_ok=True)
 
-        gdown.download_folder(
-            id=folder_id, output=tmp_dir, quiet=False, use_cookies=False
-        )
+        gdown.download_folder(id=folder_id, output=tmp_dir, quiet=False, use_cookies=False)
 
-        # FIX: Find the directory with the actual model weights, not just config
         model_src = _find_model_root(tmp_dir)
-
         if model_src is None:
-            # List what we got for debugging
             all_files = []
             for root, dirs, files in os.walk(tmp_dir):
                 for f in files:
                     all_files.append(os.path.join(root, f).replace(tmp_dir, ""))
-            print(f"[ERROR] No model weights found after download.")
-            print(f"[ERROR] Files downloaded: {all_files[:20]}")
+            print(f"[ERROR] No model weights found. Files: {all_files[:20]}")
             shutil.rmtree(tmp_dir)
             return False
 
         print(f"[INFO] Using model source: {model_src}")
-
         if os.path.exists(output_path):
             shutil.rmtree(output_path)
         shutil.copytree(model_src, output_path)
         shutil.rmtree(tmp_dir)
 
         ok = _is_model_ready(output_path)
-        if ok:
-            print(f"[INFO] Model ready at {output_path}")
-            # List final files for confirmation
-            print(f"[INFO] Files: {os.listdir(output_path)}")
-        else:
-            print(f"[ERROR] Model INCOMPLETE at {output_path}: {os.listdir(output_path)}")
+        print(f"[INFO] Model {'ready' if ok else 'INCOMPLETE'} at {output_path}")
+        print(f"[INFO] Files: {os.listdir(output_path)}")
         return ok
 
     except Exception as exc:
@@ -281,79 +263,134 @@ def _download_model_folder(folder_id: str, output_path: str) -> bool:
 
 def _quantize(model):
     return torch.quantization.quantize_dynamic(
-        model, {torch.nn.Linear}, dtype=torch.qint8
-    )
+        model, {torch.nn.Linear}, dtype=torch.qint8)
+
+
+def _load_tokenizer_robust(path: str, expected_type: str):
+    """
+    Load tokenizer robustly regardless of what tokenizer_config.json says.
+
+    Problem: Google Drive folders mix up tokenizer files — the BART folder
+    has T5Tokenizer in tokenizer_config, and the T5 folder has BartTokenizer
+    in tokenizer_config. This causes direct from_pretrained() calls to fail.
+
+    Fix: Read the actual model_type from config.json and force-load the
+    correct tokenizer class, ignoring tokenizer_config.json's class field.
+    """
+    import json
+
+    actual_type = _get_model_type(path)
+    print(f"[INFO] config.json model_type={actual_type}, expected={expected_type}")
+
+    # Strategy 1: Try the correct tokenizer for this model type directly
+    if actual_type == "t5" or expected_type == "t5":
+        # For T5: find the spiece.model file (may be in a subfolder)
+        spiece_path = None
+        for root, dirs, files in os.walk(path):
+            if "spiece.model" in files:
+                spiece_path = os.path.join(root, "spiece.model")
+                break
+
+        if spiece_path:
+            print(f"[INFO] Found spiece.model at {spiece_path}")
+            try:
+                tok = T5Tokenizer(vocab_file=spiece_path, legacy=False)
+                print("[INFO] T5Tokenizer loaded via spiece.model directly.")
+                return tok
+            except Exception as e:
+                print(f"[WARN] Direct spiece load failed: {e}")
+
+        # Try loading from a subfolder that has the T5 tokenizer files
+        for root, dirs, files in os.walk(path):
+            if "tokenizer.json" in files and "tokenizer_config.json" in files:
+                try:
+                    import json
+                    with open(os.path.join(root, "tokenizer_config.json")) as f:
+                        tc = json.load(f)
+                    if "t5" in tc.get("tokenizer_class", "").lower():
+                        tok = AutoTokenizer.from_pretrained(root)
+                        print(f"[INFO] T5 tokenizer loaded from subfolder: {root}")
+                        return tok
+                except Exception:
+                    pass
+
+    if actual_type == "bart" or expected_type == "bart":
+        try:
+            tok = BartTokenizer.from_pretrained(path)
+            print("[INFO] BartTokenizer loaded directly.")
+            return tok
+        except Exception as e:
+            print(f"[WARN] BartTokenizer direct failed: {e}")
+
+    # Strategy 2: AutoTokenizer — ignores tokenizer_class field mismatches
+    try:
+        tok = AutoTokenizer.from_pretrained(path)
+        print(f"[INFO] AutoTokenizer loaded (type={type(tok).__name__})")
+        return tok
+    except Exception as e:
+        print(f"[WARN] AutoTokenizer failed: {e}")
+
+    raise RuntimeError(f"Could not load any tokenizer from {path}")
 
 
 def load_bart():
-    """
-    Download (if needed) and load BART.
-    FIXED: Uses BartForConditionalGeneration directly instead of
-    AutoModelForSeq2SeqLM to avoid tokenizer class mismatch errors.
-    Also explicitly passes tokenizer_class override.
-    """
+    """Load BART model and tokenizer. Handles tokenizer_config mismatch."""
     try:
         if not _download_model_folder(BART_FOLDER_ID, BART_PATH):
-            print("[ERROR] BART model download failed.")
-            return None, None
+            print("[ERROR] BART download failed."); return None, None
         if not _is_model_ready(BART_PATH):
-            print("[ERROR] BART model files missing after download.")
-            return None, None
+            print("[ERROR] BART files missing."); return None, None
 
-        print(f"[INFO] Loading BART tokenizer from {BART_PATH}")
-        print(f"[INFO] BART files: {os.listdir(BART_PATH)}")
+        print(f"[INFO] Loading BART from {BART_PATH}")
+        print(f"[INFO] Files: {os.listdir(BART_PATH)}")
 
-        # FIX: Use BartTokenizer with ignore_mismatched_sizes to handle
-        # cases where the saved tokenizer_config says T5Tokenizer
-        try:
-            tok = BartTokenizer.from_pretrained(BART_PATH)
-        except Exception as e1:
-            print(f"[WARN] BartTokenizer direct load failed ({e1}), trying AutoTokenizer...")
-            from transformers import AutoTokenizer
-            tok = AutoTokenizer.from_pretrained(BART_PATH)
+        tok = _load_tokenizer_robust(BART_PATH, "bart")
 
-        print(f"[INFO] Loading BART model...")
-        # FIX: Use BartForConditionalGeneration directly — avoids the
-        # "expected str, bytes or os.PathLike object, not NoneType" error
-        # that occurs when AutoModelForSeq2SeqLM encounters a mismatched
-        # tokenizer config that returns None for the model class
+        # Load model directly as BART (avoids AutoModel class-lookup failure)
         mod = BartForConditionalGeneration.from_pretrained(
-            BART_PATH, torch_dtype=torch.float32, ignore_mismatched_sizes=True
-        )
+            BART_PATH, torch_dtype=torch.float32, ignore_mismatched_sizes=True)
         mod.eval()
         print("[INFO] BART loaded successfully.")
         return tok, _quantize(mod)
 
     except Exception as exc:
         print(f"[ERROR] BART load failed: {exc}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return None, None
 
 
 def load_t5():
-    """Download (if needed) and load T5."""
+    """
+    Load T5 model and tokenizer.
+    FIX: T5 Drive folder root has BART tokenizer files mixed in.
+    We find spiece.model by walking subdirectories and load T5Tokenizer directly.
+    """
     try:
         if not _download_model_folder(T5_FOLDER_ID, T5_PATH):
-            print("[ERROR] T5 model download failed.")
-            return None, None
+            print("[ERROR] T5 download failed."); return None, None
         if not _is_model_ready(T5_PATH):
-            print("[ERROR] T5 model files missing after download.")
-            return None, None
+            print("[ERROR] T5 files missing."); return None, None
 
-        print(f"[INFO] Loading T5 tokenizer from {T5_PATH}")
-        print(f"[INFO] T5 files: {os.listdir(T5_PATH)}")
+        print(f"[INFO] Loading T5 from {T5_PATH}")
+        print(f"[INFO] Files: {os.listdir(T5_PATH)}")
 
-        tok = T5Tokenizer.from_pretrained(T5_PATH, legacy=False)
-        mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH, torch_dtype=torch.float32)
+        tok = _load_tokenizer_robust(T5_PATH, "t5")
+
+        # Load model — T5 config.json is correct so AutoModel works fine
+        try:
+            mod = T5ForConditionalGeneration.from_pretrained(
+                T5_PATH, torch_dtype=torch.float32, ignore_mismatched_sizes=True)
+        except Exception:
+            mod = AutoModelForSeq2SeqLM.from_pretrained(
+                T5_PATH, torch_dtype=torch.float32)
+
         mod.eval()
         print("[INFO] T5 loaded successfully.")
         return tok, _quantize(mod)
 
     except Exception as exc:
         print(f"[ERROR] T5 load failed: {exc}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return None, None
 
 
@@ -826,7 +863,7 @@ def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_
         with torch.no_grad():
             out = model.generate(
                 enc["input_ids"], attention_mask=enc["attention_mask"],
-                num_beams=4, do_sample=False, early_stopping=True,
+                num_beams=1, do_sample=False, early_stopping=True,
                 min_length=safe_min, max_new_tokens=mnt,
                 no_repeat_ngram_size=3, length_penalty=1.0,
                 repetition_penalty=1.2,
