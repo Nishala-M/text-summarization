@@ -25,10 +25,31 @@ try:
     torch.set_num_interop_threads(max(1, _cpu // 2))
 except RuntimeError:
     pass
+import gdown
 
-# ── Model paths ───────────────────────────────────────────────────────────────
+# Google Drive folder IDs
+BART_FOLDER_ID = "1nQQGRPtI5R_96nZ9JTwWLsg3-icKB2we"
+T5_FOLDER_ID   = "1gFOAZ5Ypn_kDEHzGKUApJrbq_g_VuuFK"
+
+# Download BART model if not exists
+if not os.path.exists("my_bart_model"):
+    gdown.download_folder(
+        id=BART_FOLDER_ID,
+        output="my_bart_model",
+        quiet=False
+    )
+
+# Download T5 model if not exists
+if not os.path.exists("my_t5_model"):
+    gdown.download_folder(
+        id=T5_FOLDER_ID,
+        output="my_t5_model",
+        quiet=False
+    )
+
 BART_PATH = "my_bart_model"
-T5_PATH   = "my_t5_model"
+T5_PATH = "my_t5_model"
+# ── Model paths ───────────────────────────────────────────────────────────────
 
 # ── Length config ─────────────────────────────────────────────────────────────
 LENGTH_SETTINGS = {
