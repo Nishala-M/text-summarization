@@ -16,9 +16,8 @@ st.set_page_config(
     page_title="SummarAI — Intelligent Text Summarizer",
     page_icon="✦",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",   # controls are in main settings bar
 )
-
 
 # ── PDF Cleaning ───────────────────────────────────────────────────────────────
 def _clean_pdf_text(text):
@@ -198,6 +197,22 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
     border:2px dashed var(--border)!important;border-radius:10px!important;}
 [data-testid="stFileUploader"]:hover{border-color:var(--accent)!important;}
 
+/* ── Settings bar ────────────────────────────────────────────────────── */
+.settings-bar{
+    background:#ffffff;border:1.5px solid var(--border);border-radius:14px;
+    padding:1rem 1.4rem;box-shadow:var(--shadow);margin-bottom:1.2rem;
+    display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;}
+.settings-bar-title{
+    font-family:'Syne',sans-serif;font-size:.62rem;font-weight:700;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:.35rem;}
+.settings-group{flex:1;min-width:130px;}
+.status-row{display:flex;gap:.5rem;margin-top:.2rem;}
+.status-pill{display:inline-flex;align-items:center;gap:4px;
+    padding:3px 9px;border-radius:6px;font-size:.70rem;
+    font-family:'Syne',sans-serif;font-weight:700;letter-spacing:.05em;}
+.sp-ok{background:rgba(5,150,105,.12);color:#059669;border:1px solid rgba(5,150,105,.3);}
+.sp-err{background:rgba(232,69,138,.12);color:#e8458a;border:1px solid rgba(232,69,138,.3);}
+
 /* Upload button — accent background + white text */
 [data-testid="stFileUploader"] button,
 [data-testid="stFileUploaderDropzoneInput"] + button,
@@ -367,70 +382,41 @@ with st.spinner("Loading AI models..."):
 # ══════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("""
-    <div style='text-align:center;padding:.5rem 0 1.5rem;'>
-        <div style='font-family:Syne,sans-serif;font-size:1.5rem;font-weight:800;
+    <div style='text-align:center;padding:.8rem 0 1.2rem;'>
+        <div style='font-family:Syne,sans-serif;font-size:1.4rem;font-weight:800;
                     background:linear-gradient(135deg,#4f46e5,#e8458a);
                     -webkit-background-clip:text;-webkit-text-fill-color:transparent;'>
             ✦ SummarAI
         </div>
-        <div style='font-size:.7rem;color:#6b7280;letter-spacing:.12em;
-                    text-transform:uppercase;margin-top:3px;'>
-            Intelligent Summarizer
-        </div>
+        <div style='font-size:.65rem;color:#6b7280;letter-spacing:.12em;
+                    text-transform:uppercase;margin-top:3px;'>Intelligent Summarizer</div>
     </div>""", unsafe_allow_html=True)
 
-    st.markdown('<div class="card-title">Model Status</div>', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        ok = bart_mod is not None
-        st.markdown(f'<div class="model-badge {"badge-ok" if ok else "badge-err"}">{"✓" if ok else "✗"} BART</div>', unsafe_allow_html=True)
-    with c2:
-        ok = t5_mod is not None
-        st.markdown(f'<div class="model-badge {"badge-ok" if ok else "badge-err"}">{"✓" if ok else "✗"} T5</div>', unsafe_allow_html=True)
-
-    st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
-    st.markdown('<div class="card-title">⚙ Settings</div>', unsafe_allow_html=True)
-    model_choice  = st.selectbox("AI Model", ["BART", "T5"],
-                                  help="BART: Better for articles & reports. T5: General text.")
-    length_choice = st.select_slider("Summary Length",
-                                      options=["Short", "Medium", "Detailed"], value="Medium")
-
-    st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
-    st.markdown('<div class="card-title">🌐 Language</div>', unsafe_allow_html=True)
-    lang_choice = st.selectbox("Input/Output Language", list(SUPPORTED_LANGUAGES.keys()),
-                                index=0,
-                                help="Select your text language. The system auto-translates, summarizes, and returns output in your language.")
-    if lang_choice != "English":
-        st.markdown(
-            f'<div style="font-size:.75rem;color:#059669;background:rgba(5,150,105,.08);'
-            f'border:1px solid rgba(5,150,105,.2);border-radius:8px;padding:6px 10px;margin-top:4px;">'
-            f'🔄 Auto-translate: {lang_choice} ↔ English</div>',
-            unsafe_allow_html=True)
-
-    show_explain = st.toggle("Show Key Sentences", value=True)
-    show_history = st.toggle("Show History Panel", value=True)
-
-    st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
-    st.markdown('<div class="card-title">📊 Session Stats</div>', unsafe_allow_html=True)
-    avg = round(st.session_state.total_reduced / st.session_state.total_runs) \
-          if st.session_state.total_runs > 0 else 0
+    ok_b = bart_mod is not None; ok_t = t5_mod is not None
     st.markdown(f"""
-    <div style='display:flex;flex-direction:column;gap:7px;'>
-        <div class='stat-chip'>Summaries: <b>{st.session_state.total_runs}</b></div>
-        <div class='stat-chip'>Avg reduction: <b>{avg}%</b></div>
+    <div style='font-family:Syne,sans-serif;font-size:.6rem;font-weight:700;
+                letter-spacing:.14em;text-transform:uppercase;color:#5a6080;margin-bottom:.5rem;'>
+        Model Status</div>
+    <div style='display:flex;gap:.5rem;'>
+        <div class='status-pill {"sp-ok" if ok_b else "sp-err"}'>{"✓" if ok_b else "✗"} BART</div>
+        <div class='status-pill {"sp-ok" if ok_t else "sp-err"}'>{"✓" if ok_t else "✗"} T5</div>
     </div>""", unsafe_allow_html=True)
 
-    st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
-    st.markdown('<div class="card-title">📖 Length Guide</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div style='font-size:.78rem;color:#5a6080;line-height:2;'>
-        <b style='color:#1a1d2e'>Short</b> — 30–80 words<br>
-        Extractive · Key sentences · Instant<br><br>
-        <b style='color:#1a1d2e'>Medium</b> — 80–150 words<br>
-        Abstractive · AI rewrites · ~10s<br><br>
-        <b style='color:#1a1d2e'>Detailed</b> — 150–280 words<br>
-        Abstractive + Extractive · ~15s
+    st.markdown("<hr style='border-color:#c8cde8;margin:1rem 0'>", unsafe_allow_html=True)
+    avg = (round(st.session_state.total_reduced / st.session_state.total_runs)
+           if st.session_state.total_runs > 0 else 0)
+    st.markdown(f"""
+    <div style='font-size:.75rem;color:#5a6080;line-height:2;'>
+        Summaries: <b style='color:#1a1d2e'>{st.session_state.total_runs}</b><br>
+        Avg reduction: <b style='color:#1a1d2e'>{avg}%</b>
     </div>""", unsafe_allow_html=True)
+
+    st.markdown("<hr style='border-color:#c8cde8;margin:1rem 0'>", unsafe_allow_html=True)
+    st.markdown("""
+    <div style='font-size:.72rem;color:#9ca3af;line-height:1.7;'>
+        ✦ All controls are in the <b style='color:#4f46e5'>Settings Bar</b> on the main page.
+    </div>""", unsafe_allow_html=True)
+
 
 # ══════════════════════════════════════════════════════════════
 #  HERO
@@ -455,6 +441,52 @@ st.markdown("""
 # ══════════════════════════════════════════════════════════════
 #  ABOUT SECTION
 # ══════════════════════════════════════════════════════════════
+# ── Settings Bar (always visible in main area) ──────────────────────────────
+st.markdown('<div class="card-title">⚙ Settings</div>', unsafe_allow_html=True)
+st.markdown('<div class="settings-bar">', unsafe_allow_html=True)
+
+_cfg1, _cfg2, _cfg3, _cfg4, _cfg5 = st.columns([1.4, 1.6, 1.6, 1.2, 1.2])
+
+with _cfg1:
+    st.markdown('<div class="settings-bar-title">AI Model</div>', unsafe_allow_html=True)
+    model_choice = st.selectbox("AI Model", ["BART", "T5"], label_visibility="collapsed",
+                                 help="BART: articles & reports. T5: general text.")
+
+with _cfg2:
+    st.markdown('<div class="settings-bar-title">Summary Length</div>', unsafe_allow_html=True)
+    length_choice = st.select_slider("Length", options=["Short", "Medium", "Detailed"],
+                                      value="Medium", label_visibility="collapsed")
+
+with _cfg3:
+    st.markdown('<div class="settings-bar-title">Language</div>', unsafe_allow_html=True)
+    lang_choice = st.selectbox("Language", list(SUPPORTED_LANGUAGES.keys()), index=0,
+                                label_visibility="collapsed",
+                                help="Language of your input/output. Auto-translates.")
+
+with _cfg4:
+    st.markdown('<div class="settings-bar-title">Options</div>', unsafe_allow_html=True)
+    show_explain = st.toggle("Key Sentences", value=True)
+    show_history = st.toggle("History", value=True)
+
+with _cfg5:
+    st.markdown('<div class="settings-bar-title">Model Status</div>', unsafe_allow_html=True)
+    _ok_b = bart_mod is not None; _ok_t = t5_mod is not None
+    st.markdown(f"""
+    <div class='status-row'>
+        <div class='status-pill {"sp-ok" if _ok_b else "sp-err"}'>{"✓" if _ok_b else "✗"} BART</div>
+        <div class='status-pill {"sp-ok" if _ok_t else "sp-err"}'>{"✓" if _ok_t else "✗"} T5</div>
+    </div>""", unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)  # close settings-bar
+
+if lang_choice != "English":
+    st.markdown(f"""
+    <div style='background:rgba(5,150,105,.07);border:1px solid rgba(5,150,105,.22);
+                border-radius:9px;padding:.55rem 1rem;font-size:.78rem;color:#059669;
+                margin-bottom:.8rem;display:flex;align-items:center;gap:7px;'>
+        🌐 <b>Auto-translate:</b> {lang_choice} input → English for AI → {lang_choice} output
+    </div>""", unsafe_allow_html=True)
+
 with st.expander("🧠  About the AI Models & How to Use", expanded=False):
     col1, col2 = st.columns(2, gap="medium")
     with col1:
