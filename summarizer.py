@@ -60,7 +60,7 @@ LENGTH_SETTINGS = {
     "Medium":   {"min_length": 50,  "max_length": 100},
     "Detailed": {"min_length": 80,  "max_length": 160},
 }
-OUTPUT_CAPS = {"Short": 80, "Medium": 150, "Detailed": 280}
+OUTPUT_CAPS = {"Short": 80, "Medium": 130, "Detailed": 200}
 
 # ── SPEED PARAMETERS ─────────────────────────────────────────────────────────
 #
@@ -1069,7 +1069,7 @@ def generate_summary(
         out_cap = max(20, int(wc * 0.50))
     elif wc < 200:
         ratios  = {"Short": 0.55, "Medium": 0.60, "Detailed": 0.70}
-        mins    = {"Short": 35,   "Medium": 60,   "Detailed": 90}
+        mins    = {"Short": 35,   "Medium": 60,   "Detailed": 0}
         out_cap = min(base, max(mins[length_choice], int(wc * ratios[length_choice])))
     else:
         out_cap = base
