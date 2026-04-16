@@ -77,21 +77,21 @@ OUTPUT_CAPS = {"Short": 80, "Medium": 130, "Detailed": 200}
 #
 INPUT_WORD_LIMIT = {
     "Short":    60,   # extractive only — not used for AI
-    "Medium":   90,
-    "Detailed": 120,
+    "Medium":   75,
+    "Detailed": 100,
 }
 
 # MAX_NEW_TOKENS: decoder steps per call. Each step = 1 forward pass of decoder.
 # These values are calibrated to produce enough raw text for our OUTPUT_CAPS.
 MAX_NEW_TOKENS = {
     "Short":    40,   # not used for AI
-    "Medium":   110,
-    "Detailed": 160,
+    "Medium":   75,
+    "Detailed": 110,
 }
 
 # TOKENIZER_MAX_LEN: hard cap on encoder input tokens.
 # 120 words × 1.35 BPE = 162 tokens → 170 is safe (previously 110, caused truncation).
-TOKENIZER_MAX_LEN = 170
+TOKENIZER_MAX_LEN = 140
 
 # SMART_TRIM_MAX_SENTS: max sentences fed to TF-IDF inside smart_trim.
 # 60²=3,600 vs 300²=90,000 — 25x cheaper.
@@ -338,7 +338,7 @@ def load_bart():
         mod = BartForConditionalGeneration.from_pretrained(
             BART_PATH, torch_dtype=torch.float32, ignore_mismatched_sizes=True)
         mod.eval(); mod.config.use_cache = True
-        mod = _quantize(mod); mod = _try_compile(mod)
+        mod = _quantize(mod); 
         print("[INFO] BART loaded and optimized."); return tok, mod
     except Exception as exc:
         import traceback; print(f"[ERROR] BART load failed: {exc}"); traceback.print_exc()
@@ -356,7 +356,7 @@ def load_t5():
         except Exception:
             mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH, torch_dtype=torch.float32)
         mod.eval(); mod.config.use_cache = True
-        mod = _quantize(mod); mod = _try_compile(mod)
+        mod = _quantize(mod); 
         print("[INFO] T5 loaded and optimized."); return tok, mod
     except Exception as exc:
         import traceback; print(f"[ERROR] T5 load failed: {exc}"); traceback.print_exc()
@@ -857,11 +857,13 @@ def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_
                 num_beams=1,                    # greedy: no beam overhead
                 do_sample=False,
                 early_stopping=True,
+                eos_token_id=tokenizer.eos_token_id,
+                pad_token_id=tokenizer.pad_token_id,
                 min_length=safe_min,
                 max_new_tokens=mnt,
                 no_repeat_ngram_size=3,
                 length_penalty=0.9,
-                repetition_penalty=1.2,
+                repetition_penalty=1.1,
             )
         raw = tokenizer.decode(out[0], skip_special_tokens=True,
                                clean_up_tokenization_spaces=True).strip()
@@ -927,7 +929,9 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
     if ai_out and wc > 250 and len(ai_out.split()) > 0.70 * wc: ai_out = ""
 
     ai_wc   = len(ai_out.split()) if ai_out else 0
-    ext     = extractive_summary(cleaned, top_n=ext_top)
+    ext = ""
+    if not ai_out or len(ai_out.split()) < 40:
+       ext = extractive_summary(cleaned, top_n=ext_top)
     tgt_min = int(wc * 0.40) if wc < 200 else {"Medium": 60, "Detailed": 100}[length_choice]
 
     if ai_wc >= tgt_min:
@@ -983,4 +987,6 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
     final = _cap(final, out_cap, strict=False)
     final = _ensure_complete_sentences(final)
     final = _RE_WS.sub(" ", final).strip()
-    return final[0].upper() + final[1:] if final and not final[0].isupper() else final
+    if final and not final[0].isupper():
+      final = final[0].upper() + final[1:]
+    return final
