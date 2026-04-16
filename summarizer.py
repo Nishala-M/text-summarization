@@ -1,32 +1,14 @@
-# summarizer.py — Final Speed-Optimized Deployment Version
+# summarizer.py — Final Deployment Version
 # ─────────────────────────────────────────────────────────────────────────────
-# Short:    30–80w   | TF-IDF Extractive | 0 model calls | < 1s
-# Medium:   80–130w  | AI Abstractive    | ~4–8s on CPU
-# Detailed: 130–200w | AI + Extractive   | ~7–12s on CPU
+# Short:    30–80w  | TF-IDF Extractive  | 0 model calls | Instant
+# Medium:   80–150w | AI Abstractive     | ~8-12s
+# Detailed: 150–280w| AI + Extractive    | ~12-18s
 #
-# ── SPEED ARCHITECTURE ───────────────────────────────────────────────────────
-# 1. _fast_presample() fires BEFORE clean_input() — reduces long docs to
-#    300-500 words using O(n) word-split (no regex, no tokenizer).
-#    clean_input() then sees <50 lines instead of 300+.
-#
-# 2. SMART_TRIM_MAX_SENTS=50 caps TF-IDF inside smart_trim.
-#    50²=2,500 vs 300²=90,000 — 36x cheaper cosine_similarity.
-#
-# 3. TOKENIZER_MAX_LEN=150 matches actual input size (80-110 words × 1.35 BPE).
-#    Previously 512 → wasted padding computation.
-#
-# 4. MAX_NEW_TOKENS: Medium=90, Detailed=140 — calibrated to produce
-#    enough raw text for OUTPUT_CAPS without over-generating.
-#
-# 5. torch.inference_mode() + torch.compile() + use_cache=True at load time.
-#
-# 6. INPUT_WORD_LIMIT: Medium=80w, Detailed=110w.
-#    80w ≈ 104 tokens → encoder attention = 104²×6 = 64K ops (fast).
+# Models are downloaded automatically from Google Drive on first run.
 # ─────────────────────────────────────────────────────────────────────────────
 
 import os
 import re
-import json
 import shutil
 import nltk
 import torch
@@ -34,7 +16,7 @@ from collections import Counter
 from transformers import (
     BartTokenizer, BartForConditionalGeneration,
     T5Tokenizer, T5ForConditionalGeneration,
-    AutoTokenizer, AutoModelForSeq2SeqLM,
+    AutoModelForSeq2SeqLM, AutoTokenizer
 )
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -44,7 +26,7 @@ import gdown
 nltk.download("punkt",     quiet=True)
 nltk.download("punkt_tab", quiet=True)
 
-# ── CPU threading ──────────────────────────────────────────────────────────────
+# ── CPU threading ─────────────────────────────────────────────────────────────
 _cpu = os.cpu_count() or 4
 try:
     torch.set_num_threads(_cpu)
@@ -52,51 +34,26 @@ try:
 except RuntimeError:
     pass
 
-# ── Model paths & Google Drive IDs ────────────────────────────────────────────
+# ── Model paths & Google Drive folder IDs ────────────────────────────────────
 BART_PATH      = "my_bart_model"
 T5_PATH        = "my_t5_model"
 BART_FOLDER_ID = "1nQQGRPtI5R_96nZ9JTwWLsg3-icKB2we"
 T5_FOLDER_ID   = "1gFOAZ5Ypn_kDEHzGKUApJrbq_g_VuuFK"
 
-# ── Length targets ─────────────────────────────────────────────────────────────
+# ── Length configuration ──────────────────────────────────────────────────────
 LENGTH_SETTINGS = {
-    "Short":    {"min_length": 25,  "max_length": 60},
-    "Medium":   {"min_length": 50,  "max_length": 100},
-    "Detailed": {"min_length": 80,  "max_length": 150},
+    "Short":    {"min_length": 30,  "max_length": 80},
+    "Medium":   {"min_length": 80,  "max_length": 150},
+    "Detailed": {"min_length": 150, "max_length": 280},
 }
-OUTPUT_CAPS = {"Short": 80, "Medium": 130, "Detailed": 200}
+OUTPUT_CAPS      = {"Short": 80,  "Medium": 150, "Detailed": 280}
+INPUT_WORD_LIMIT = {"Short": 120, "Medium": 150, "Detailed": 200}
+MAX_NEW_TOKENS   = {"Short": 60, "Medium": 100, "Detailed": 140}
 
-# ── Speed parameters (tuned for sub-10s on CPU) ────────────────────────────────
-INPUT_WORD_LIMIT = {
-    "Short":    60,    # extractive only — not used for AI
-    "Medium":   80,    # 80w × 1.35 BPE = 108 tokens → fast encoder
-    "Detailed": 110,   # 110w × 1.35 BPE = 148 tokens → acceptable
-}
+MAX_CLEAN_WORDS      = 8000
+MAX_SENTS_EXTRACTIVE = 300
 
-# MAX_NEW_TOKENS: each step = one full decoder forward pass.
-# 90 steps × ~30ms/step on quantized CPU = ~2.7s decoder time.
-MAX_NEW_TOKENS = {
-    "Short":    40,    # unused for AI
-    "Medium":   90,    # ~2-3s decoder
-    "Detailed": 140,   # ~4-5s decoder
-}
-
-# Hard cap on encoder input tokens — prevents silent truncation.
-# INPUT_WORD_LIMIT × 1.35 BPE + 5 safety margin.
-TOKENIZER_MAX_LEN = 155
-
-# Max sentences fed to TF-IDF inside smart_trim. 50²=2,500 ops.
-SMART_TRIM_MAX_SENTS = 50
-
-# Pre-sample target words BEFORE clean_input() runs.
-PRESAMPLE_TARGET = {
-    "Short": 300, "Medium": 400, "Detailed": 500
-}
-
-MAX_CLEAN_WORDS      = 4000
-MAX_SENTS_EXTRACTIVE = 150
-
-# ── Compiled regex ─────────────────────────────────────────────────────────────
+# ── Compiled regex ────────────────────────────────────────────────────────────
 _RE_REFSEC  = re.compile(
     r"^(references|bibliography|works cited|acknowledgment[s]?|"
     r"acknowledgement[s]?|appendix|about the author[s]?)[\s:]*$", re.IGNORECASE)
@@ -117,14 +74,15 @@ _RE_DASH    = re.compile(r"^[-\u2013\u2014\u2022]")
 _RE_ACRONYM = re.compile(r"^([A-Z][a-z]+)\s+\(([A-Z]+)\)")
 _RE_HYPHEN  = re.compile(r"-\s+")
 _RE_WS      = re.compile(r"\s+")
-_RE_NONASCII = re.compile(r"[^\x00-\x7F]+")
-_RE_REPWORD  = re.compile(r"\b(\w+)( \1\b)+")
-_META_KW = re.compile("|".join(re.escape(k) for k in [
+_RE_NONASCII= re.compile(r"[^\x00-\x7F]+")
+_RE_REPWORD = re.compile(r"\b(\w+)( \1\b)+")
+_META_KW    = re.compile("|".join(re.escape(k) for k in [
     "uploaded by", "downloaded", "researchgate", "available online",
     "article history", "copyright", "licence", "license",
     "received:", "accepted:", "published:", "revised:",
     "doi:", "isbn:", "issn:", "http://", "https://", "www.", "@",
 ]), re.IGNORECASE)
+
 _RE_CITATION_INLINE = re.compile(r'\[\d+\]')
 _RE_HYPHEN_INITIAL  = re.compile(r'[A-Z]\.-[A-Z]\.')
 _RE_AUTHOR_CHAIN    = re.compile(r'[A-Z]\.\s+[A-Z][a-z]+,\s+[A-Z]\.')
@@ -145,32 +103,35 @@ _RE_SETUP_SENT = re.compile(
     re.IGNORECASE)
 
 _BAD_START = {
-    "however", "moreover", "furthermore", "therefore", "thus", "hence",
-    "nevertheless", "nonetheless", "additionally", "consequently",
-    "meanwhile", "similarly", "likewise", "whereas", "although", "though",
-    "explainability", "summarization", "preprocessing", "tokenization",
+    "however","moreover","furthermore","therefore","thus","hence",
+    "nevertheless","nonetheless","additionally","consequently",
+    "meanwhile","similarly","likewise","whereas","although","though",
+    "explainability","summarization","preprocessing","tokenization",
 }
 _BAD_END = {
-    "and", "or", "but", "the", "of", "in", "a", "an", "for", "to", "with",
-    "by", "at", "is", "are", "as", "such", "also", "including",
+    "and","or","but","the","of","in","a","an","for","to","with",
+    "by","at","is","are","as","such","also","including",
+    "deliberate","planning","marketing","education",
 }
 _BAD_PHRASES = [
     "it is essential to maintain health and reduce",
     "it is important to maintain health",
-    "broad range of computing", "broad spectrum of computational",
-    "as AI, it encompass", "is a more than the same",
-    "is designed to the system", "is designed to help the most efficient",
+    "broad range of computing","broad spectrum of computational",
+    "as AI, it encompass","is a more than the same",
+    "is designed to the system","is designed to help the most efficient",
     "the best service in a variety of the",
 ]
 _TRIVIAL = {"of","and","the","a","an","in","to","for","with","by","at","or","its","their","from"}
 _COMMON_VERBS = {
     "is","are","was","were","has","have","had","does","do","did","will","would",
     "can","could","should","may","might","must","be","been","being",
-    "include","includes","included","represent","represents","allow","allows",
-    "provide","provides","show","shows","help","helps","make","makes",
-    "give","gives","take","takes","use","uses","mean","means","find","found",
-    "resist","absorbed","transformed","developed","emerged","created","built",
-    "shaped","became","remained","continued",
+    "include","includes","included","represent","represents","represented",
+    "allow","allows","allowed","provide","provides","provided",
+    "show","shows","showed","shown","help","helps","helped",
+    "make","makes","made","give","gives","gave","take","takes","took",
+    "use","uses","used","mean","means","meant","find","found",
+    "resist","resists","resisted","absorbed","transformed","developed",
+    "emerged","created","built","shaped","became","remained","continued",
 }
 
 
@@ -180,126 +141,124 @@ _COMMON_VERBS = {
 
 def _has_title_merge(s: str) -> bool:
     words = s.split()
-    if len(words) < 8: return False
+    if len(words) < 8:
+        return False
     title_count = 0
     for i, w in enumerate(words):
         clean = re.sub(r"[^a-zA-Z]", "", w)
-        if not clean: continue
-        if clean.lower() in _TRIVIAL: continue
-        if clean[0].isupper(): title_count += 1
-        elif clean[0].islower(): break
+        if not clean:
+            continue
+        cl = clean.lower()
+        if cl in _TRIVIAL:
+            continue
+        if clean[0].isupper():
+            title_count += 1
+        elif clean[0].islower():
+            break
         if title_count >= 3 and i + 1 < len(words):
             nxt = re.sub(r"[^a-zA-Z]", "", words[i + 1])
             if nxt and nxt[0].isupper() and nxt.lower() not in _TRIVIAL:
                 prefix = [re.sub(r"[^a-z]", "", w2.lower()) for w2 in words[:i + 1]]
                 if not any(p in _COMMON_VERBS for p in prefix):
                     return True
+    if len(words) >= 6:
+        first = re.sub(r"[^a-zA-Z]", "", words[0])
+        if (first and first[0].isupper()
+                and len(first) <= 3
+                and first.lower() not in _TRIVIAL):
+            first_four = [re.sub(r"[^a-z]", "", w.lower()) for w in words[:4]]
+            if not any(fw in _COMMON_VERBS for fw in first_four):
+                return True
     return False
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# MODEL DOWNLOAD & LOADING
+# MODEL DOWNLOADING & LOADING  ← FIXED
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _is_model_ready(path: str) -> bool:
-    if not os.path.isdir(path): return False
+    """Return True only when config.json AND a weights file exist at path root."""
+    if not os.path.isdir(path):
+        return False
     files = os.listdir(path)
     return "config.json" in files and (
         "model.safetensors" in files or "pytorch_model.bin" in files)
 
 
 def _get_model_type(path: str) -> str:
+    """
+    Read config.json to determine the actual model_type stored in the folder.
+    Returns 'bart', 't5', or 'unknown'.
+    """
+    import json
+    config_path = os.path.join(path, "config.json")
     try:
-        with open(os.path.join(path, "config.json")) as f:
-            return json.load(f).get("model_type", "unknown").lower()
-    except Exception: return "unknown"
+        with open(config_path) as f:
+            cfg = json.load(f)
+        return cfg.get("model_type", "unknown").lower()
+    except Exception:
+        return "unknown"
 
 
-def _find_model_root(search_dir: str):
-    if _is_model_ready(search_dir): return search_dir
+def _find_model_root(search_dir: str) -> str | None:
+    """
+    Find the directory containing BOTH config.json AND model weights.
+    Checks root first, then subfolders. Returns shortest path (closest to root).
+    """
+    if _is_model_ready(search_dir):
+        return search_dir
     candidates = []
     for root, dirs, files in os.walk(search_dir):
         if "config.json" in files and (
                 "model.safetensors" in files or "pytorch_model.bin" in files):
             candidates.append(root)
-    if not candidates: return None
-    candidates.sort(key=len)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: len(p))
     return candidates[0]
 
 
 def _download_model_folder(folder_id: str, output_path: str) -> bool:
+    """Download Google Drive folder. Finds actual model root after download."""
     if _is_model_ready(output_path):
-        print(f"[INFO] Model already present at {output_path}"); return True
+        print(f"[INFO] Model already present at {output_path}")
+        return True
+
     print(f"[INFO] Downloading model {folder_id} → {output_path} ...")
     tmp_dir = output_path + "_tmp_dl"
     try:
-        if os.path.exists(tmp_dir): shutil.rmtree(tmp_dir)
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
         os.makedirs(tmp_dir, exist_ok=True)
+
         gdown.download_folder(id=folder_id, output=tmp_dir, quiet=False, use_cookies=False)
+
         model_src = _find_model_root(tmp_dir)
         if model_src is None:
             all_files = []
-            for r, d, fs in os.walk(tmp_dir):
-                for f in fs: all_files.append(os.path.join(r, f).replace(tmp_dir, ""))
+            for root, dirs, files in os.walk(tmp_dir):
+                for f in files:
+                    all_files.append(os.path.join(root, f).replace(tmp_dir, ""))
             print(f"[ERROR] No model weights found. Files: {all_files[:20]}")
-            shutil.rmtree(tmp_dir); return False
-        if os.path.exists(output_path): shutil.rmtree(output_path)
+            shutil.rmtree(tmp_dir)
+            return False
+
+        print(f"[INFO] Using model source: {model_src}")
+        if os.path.exists(output_path):
+            shutil.rmtree(output_path)
         shutil.copytree(model_src, output_path)
         shutil.rmtree(tmp_dir)
+
         ok = _is_model_ready(output_path)
         print(f"[INFO] Model {'ready' if ok else 'INCOMPLETE'} at {output_path}")
+        print(f"[INFO] Files: {os.listdir(output_path)}")
         return ok
+
     except Exception as exc:
         print(f"[ERROR] Download failed ({output_path}): {exc}")
-        if os.path.exists(tmp_dir): shutil.rmtree(tmp_dir)
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
         return False
-
-
-def _load_tokenizer_robust(path: str, expected_type: str):
-    """Load tokenizer, handling the T5/BART mismatch from mixed Drive folders."""
-    actual_type = _get_model_type(path)
-    print(f"[INFO] Loading tokenizer: actual={actual_type}, expected={expected_type}")
-
-    # T5: find spiece.model (works even if tokenizer_config.json says BartTokenizer)
-    if expected_type == "t5":
-        spiece_path = None
-        for root, dirs, files in os.walk(path):
-            if "spiece.model" in files:
-                spiece_path = os.path.join(root, "spiece.model"); break
-        if spiece_path:
-            try:
-                tok = T5Tokenizer(vocab_file=spiece_path, legacy=False)
-                print(f"[INFO] T5Tokenizer loaded via spiece.model at {spiece_path}")
-                return tok
-            except Exception as exc:
-                print(f"[WARN] T5Tokenizer(spiece) failed: {exc}")
-        # Fallback: find subfolder with correct T5 tokenizer_config
-        for root, dirs, files in os.walk(path):
-            if "tokenizer_config.json" in files:
-                try:
-                    with open(os.path.join(root, "tokenizer_config.json")) as f:
-                        tc = json.load(f)
-                    if "t5" in tc.get("tokenizer_class", "").lower():
-                        tok = AutoTokenizer.from_pretrained(root)
-                        print(f"[INFO] T5 AutoTokenizer from subfolder: {root}"); return tok
-                except Exception: pass
-
-    # BART
-    if expected_type == "bart":
-        try:
-            tok = BartTokenizer.from_pretrained(path)
-            print("[INFO] BartTokenizer loaded."); return tok
-        except Exception as exc:
-            print(f"[WARN] BartTokenizer failed: {exc}")
-            try:
-                tok = AutoTokenizer.from_pretrained(path)
-                print(f"[INFO] AutoTokenizer fallback: {type(tok).__name__}"); return tok
-            except Exception as exc2:
-                raise RuntimeError(f"Cannot load BART tokenizer: {exc2}")
-
-    # Generic fallback
-    tok = AutoTokenizer.from_pretrained(path)
-    print(f"[INFO] AutoTokenizer: {type(tok).__name__}"); return tok
 
 
 def _quantize(model):
@@ -307,49 +266,131 @@ def _quantize(model):
         model, {torch.nn.Linear}, dtype=torch.qint8)
 
 
-def _try_compile(model):
-    """torch.compile() gives ~10-15% speedup on CPU with PyTorch 2.x."""
+def _load_tokenizer_robust(path: str, expected_type: str):
+    """
+    Load tokenizer robustly regardless of what tokenizer_config.json says.
+
+    Problem: Google Drive folders mix up tokenizer files — the BART folder
+    has T5Tokenizer in tokenizer_config, and the T5 folder has BartTokenizer
+    in tokenizer_config. This causes direct from_pretrained() calls to fail.
+
+    Fix: Read the actual model_type from config.json and force-load the
+    correct tokenizer class, ignoring tokenizer_config.json's class field.
+    """
+    import json
+
+    actual_type = _get_model_type(path)
+    print(f"[INFO] config.json model_type={actual_type}, expected={expected_type}")
+
+    # Strategy 1: Try the correct tokenizer for this model type directly
+    if actual_type == "t5" or expected_type == "t5":
+        # For T5: find the spiece.model file (may be in a subfolder)
+        spiece_path = None
+        for root, dirs, files in os.walk(path):
+            if "spiece.model" in files:
+                spiece_path = os.path.join(root, "spiece.model")
+                break
+
+        if spiece_path:
+            print(f"[INFO] Found spiece.model at {spiece_path}")
+            try:
+                tok = T5Tokenizer(vocab_file=spiece_path, legacy=False)
+                print("[INFO] T5Tokenizer loaded via spiece.model directly.")
+                return tok
+            except Exception as e:
+                print(f"[WARN] Direct spiece load failed: {e}")
+
+        # Try loading from a subfolder that has the T5 tokenizer files
+        for root, dirs, files in os.walk(path):
+            if "tokenizer.json" in files and "tokenizer_config.json" in files:
+                try:
+                    import json
+                    with open(os.path.join(root, "tokenizer_config.json")) as f:
+                        tc = json.load(f)
+                    if "t5" in tc.get("tokenizer_class", "").lower():
+                        tok = AutoTokenizer.from_pretrained(root)
+                        print(f"[INFO] T5 tokenizer loaded from subfolder: {root}")
+                        return tok
+                except Exception:
+                    pass
+
+    if actual_type == "bart" or expected_type == "bart":
+        try:
+            tok = BartTokenizer.from_pretrained(path)
+            print("[INFO] BartTokenizer loaded directly.")
+            return tok
+        except Exception as e:
+            print(f"[WARN] BartTokenizer direct failed: {e}")
+
+    # Strategy 2: AutoTokenizer — ignores tokenizer_class field mismatches
     try:
-        compiled = torch.compile(model, fullgraph=False, dynamic=False)
-        print("[INFO] torch.compile() applied."); return compiled
-    except Exception as exc:
-        print(f"[INFO] torch.compile() skipped: {exc}"); return model
+        tok = AutoTokenizer.from_pretrained(path)
+        print(f"[INFO] AutoTokenizer loaded (type={type(tok).__name__})")
+        return tok
+    except Exception as e:
+        print(f"[WARN] AutoTokenizer failed: {e}")
+
+    raise RuntimeError(f"Could not load any tokenizer from {path}")
 
 
 def load_bart():
+    """Load BART model and tokenizer. Handles tokenizer_config mismatch."""
     try:
-        if not _download_model_folder(BART_FOLDER_ID, BART_PATH): return None, None
-        if not _is_model_ready(BART_PATH): return None, None
+        if not _download_model_folder(BART_FOLDER_ID, BART_PATH):
+            print("[ERROR] BART download failed."); return None, None
+        if not _is_model_ready(BART_PATH):
+            print("[ERROR] BART files missing."); return None, None
+
+        print(f"[INFO] Loading BART from {BART_PATH}")
+        print(f"[INFO] Files: {os.listdir(BART_PATH)}")
+
         tok = _load_tokenizer_robust(BART_PATH, "bart")
+
+        # Load model directly as BART (avoids AutoModel class-lookup failure)
         mod = BartForConditionalGeneration.from_pretrained(
             BART_PATH, torch_dtype=torch.float32, ignore_mismatched_sizes=True)
         mod.eval()
-        mod.config.use_cache = True     # KV-cache: 30-40% faster decoding
-        mod = _quantize(mod)
-        mod = _try_compile(mod)
-        print("[INFO] BART loaded and optimized."); return tok, mod
+        print("[INFO] BART loaded successfully.")
+        return tok, _quantize(mod)
+
     except Exception as exc:
-        import traceback; print(f"[ERROR] BART: {exc}"); traceback.print_exc()
+        print(f"[ERROR] BART load failed: {exc}")
+        import traceback; traceback.print_exc()
         return None, None
 
 
 def load_t5():
+    """
+    Load T5 model and tokenizer.
+    FIX: T5 Drive folder root has BART tokenizer files mixed in.
+    We find spiece.model by walking subdirectories and load T5Tokenizer directly.
+    """
     try:
-        if not _download_model_folder(T5_FOLDER_ID, T5_PATH): return None, None
-        if not _is_model_ready(T5_PATH): return None, None
+        if not _download_model_folder(T5_FOLDER_ID, T5_PATH):
+            print("[ERROR] T5 download failed."); return None, None
+        if not _is_model_ready(T5_PATH):
+            print("[ERROR] T5 files missing."); return None, None
+
+        print(f"[INFO] Loading T5 from {T5_PATH}")
+        print(f"[INFO] Files: {os.listdir(T5_PATH)}")
+
         tok = _load_tokenizer_robust(T5_PATH, "t5")
+
+        # Load model — T5 config.json is correct so AutoModel works fine
         try:
             mod = T5ForConditionalGeneration.from_pretrained(
                 T5_PATH, torch_dtype=torch.float32, ignore_mismatched_sizes=True)
         except Exception:
-            mod = AutoModelForSeq2SeqLM.from_pretrained(T5_PATH, torch_dtype=torch.float32)
+            mod = AutoModelForSeq2SeqLM.from_pretrained(
+                T5_PATH, torch_dtype=torch.float32)
+
         mod.eval()
-        mod.config.use_cache = True
-        mod = _quantize(mod)
-        mod = _try_compile(mod)
-        print("[INFO] T5 loaded and optimized."); return tok, mod
+        print("[INFO] T5 loaded successfully.")
+        return tok, _quantize(mod)
+
     except Exception as exc:
-        import traceback; print(f"[ERROR] T5: {exc}"); traceback.print_exc()
+        print(f"[ERROR] T5 load failed: {exc}")
+        import traceback; traceback.print_exc()
         return None, None
 
 
@@ -364,32 +405,20 @@ def _sent_tok(text: str) -> list:
 
 def has_metadata(t: str) -> bool:
     tl = t.lower()
-    return bool(_META_KW.search(tl) or _RE_MONTH.search(tl)
-                or _RE_INST.search(tl) or _RE_ETAL.search(tl) or _RE_EMAIL.search(t))
+    return bool(
+        _META_KW.search(tl) or _RE_MONTH.search(tl)
+        or _RE_INST.search(tl) or _RE_ETAL.search(tl)
+        or _RE_EMAIL.search(t)
+    )
 
 
-def is_research_paper(text: str) -> bool:
-    sample = text[:5000]
-    score  = sum(1 for p in [
-        r'\[\d+\]', r'\bDOI\b', r'\bIEEE\b', r'\bACM\b',
-        r'\bet al\.\b', r'\bpp\.\s*\d+', r'\bvol\.\s*\d+', r'arXiv', r'\bProceedings\b',
-    ] if re.search(p, sample, re.IGNORECASE))
-    return score >= 2
-
-
-def _is_academic_noise(s: str) -> bool:
-    if len(_RE_CITATION_INLINE.findall(s)) >= 2: return True
-    if _RE_HYPHEN_INITIAL.search(s): return True
-    if _RE_AUTHOR_CHAIN.search(s): return True
-    if _RE_PAGE_RANGE.search(s) and _RE_YEAR_PAREN.search(s): return True
-    if len(_RE_JOURNAL_KW.findall(s)) >= 2: return True
-    if _RE_ADVANTAGE_LBL.search(s) and len(s.split()) < 30: return True
-    if re.match(r'^\d+[,\.\s]', s.strip()) and len(s.split()) < 15: return True
-    return False
-
+# ═════════════════════════════════════════════════════════════════════════════
+# SENTENCE QUALITY FILTER
+# ═════════════════════════════════════════════════════════════════════════════
 
 def _is_bad_sentence(s: str) -> bool:
-    s = s.strip(); w = s.split()
+    s = s.strip()
+    w = s.split()
     if len(w) < 6 or ".." in s: return True
     if s and s[0].islower(): return True
     if _RE_DASH.match(s): return True
@@ -413,12 +442,38 @@ def _is_bad_sentence(s: str) -> bool:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# RESEARCH PAPER HELPERS
+# ═════════════════════════════════════════════════════════════════════════════
+
+def is_research_paper(text: str) -> bool:
+    sample = text[:5000]
+    score  = sum(1 for p in [
+        r'\[\d+\]', r'\bDOI\b', r'\bIEEE\b', r'\bACM\b',
+        r'\bet al\.\b', r'\bpp\.\s*\d+', r'\bvol\.\s*\d+',
+        r'arXiv', r'\bProceedings\b',
+    ] if re.search(p, sample, re.IGNORECASE))
+    return score >= 2
+
+
+def _is_academic_noise(s: str) -> bool:
+    if len(_RE_CITATION_INLINE.findall(s)) >= 2: return True
+    if _RE_HYPHEN_INITIAL.search(s): return True
+    if _RE_AUTHOR_CHAIN.search(s): return True
+    if _RE_PAGE_RANGE.search(s) and _RE_YEAR_PAREN.search(s): return True
+    if len(_RE_JOURNAL_KW.findall(s)) >= 2: return True
+    if _RE_ADVANTAGE_LBL.search(s) and len(s.split()) < 30: return True
+    if re.match(r'^\d+[,\.\s]', s.strip()) and len(s.split()) < 15: return True
+    return False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # INPUT CLEANING
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _strip_refs(text: str) -> str:
     _RE_REF_LINE = re.compile(
-        r'^\[\d+\]|^\d+\.\s+[A-Z][a-z]+.*(?:IEEE|ACM|vol\.|pp\.|Journal)', re.IGNORECASE)
+        r'^\[\d+\]|^\d+\.\s+[A-Z][a-z]+.*(?:IEEE|ACM|vol\.|pp\.|Journal)',
+        re.IGNORECASE)
     lines = text.split("\n"); out = []; in_refs = False
     for line in lines:
         s = line.strip()
@@ -457,9 +512,10 @@ def clean_input(text: str, short_input: bool = False) -> str:
         text = re.sub(r',\s*,', ',', text)
         text = re.sub(r'\s{2,}', ' ', text)
 
-    text = _strip_refs(text)
+    text  = _strip_refs(text)
     lines = text.split("\n"); kept = []
     min_wc = 5 if short_input else 7
+
     for line in lines:
         line = line.strip()
         if not line or _is_header(line): continue
@@ -490,7 +546,8 @@ def clean_input(text: str, short_input: bool = False) -> str:
     merged = []
     for i, line in enumerate(kept):
         if i == 0: merged.append(line); continue
-        last_word  = (merged[-1].rstrip().split()[-1].lower().rstrip(",:;") if merged[-1].strip() else "")
+        last_word  = (merged[-1].rstrip().split()[-1].lower().rstrip(",:;")
+                      if merged[-1].strip() else "")
         first_char = line.lstrip()[0] if line.strip() else ""
         prev_ends  = merged[-1].rstrip()[-1] in ".!?" if merged[-1].strip() else False
         if not prev_ends and first_char.isupper():
@@ -498,6 +555,7 @@ def clean_input(text: str, short_input: bool = False) -> str:
                 merged[-1] = merged[-1].rstrip().rstrip(",:;") + "."
         merged.append(line)
     text = " ".join(merged)
+
     text = _RE_HYPHEN.sub("", text)
     text = _RE_WS.sub(" ", text)
     text = _RE_NONASCII.sub(" ", text)
@@ -509,56 +567,18 @@ def clean_input(text: str, short_input: bool = False) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# FAST PRE-SAMPLING  (key speed fix for long PDFs)
-# ═════════════════════════════════════════════════════════════════════════════
-
-def _fast_presample(text: str, target_words: int) -> str:
-    """
-    Reduce long documents to target_words using zone-based word-splitting.
-    Runs BEFORE clean_input() — pure split(), no regex, no tokenizer.
-    Zone weights: 40% intro + 35% middle + 25% conclusion.
-    """
-    words = text.split()
-    if len(words) <= target_words:
-        return text
-    n     = len(words)
-    n_s   = int(target_words * 0.40)
-    n_m   = int(target_words * 0.35)
-    n_e   = target_words - n_s - n_m
-    mid   = n // 2
-    half  = n_m // 2
-    return " ".join(
-        words[:n_s]
-        + words[max(0, mid - half): mid + half]
-        + words[max(0, n - n_e):]
-    )
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# SMART TRIM  (zone-based TF-IDF, hard-capped at SMART_TRIM_MAX_SENTS)
+# SMART TRIM  (zone-based)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def smart_trim(text: str, length_choice: str) -> str:
-    limit = INPUT_WORD_LIMIT.get(length_choice, 80)
+    limit = INPUT_WORD_LIMIT.get(length_choice, 150)
     words = text.split()
     if len(words) <= limit: return text
     try:
         sents = _sent_tok(text)
-        sents = [s.strip() for s in sents if len(s.split()) >= 6 and not _is_bad_sentence(s.strip())]
+        sents = [s.strip() for s in sents
+                 if len(s.split()) >= 6 and not _is_bad_sentence(s.strip())]
         if not sents: return " ".join(words[:limit])
-
-        # Hard cap with spread sampling to keep document coverage
-        if len(sents) > SMART_TRIM_MAX_SENTS:
-            n       = len(sents)
-            n_front = max(1, SMART_TRIM_MAX_SENTS // 5)
-            n_back  = max(1, SMART_TRIM_MAX_SENTS // 5)
-            n_mid   = SMART_TRIM_MAX_SENTS - n_front - n_back
-            mid     = n // 2; half_m = n_mid // 2
-            pool    = sents[:n_front] + sents[max(0, mid - half_m): mid + half_m] + sents[max(0, n - n_back):]
-            seen = set(); sents = []
-            for s in pool:
-                if s not in seen: seen.add(s); sents.append(s)
-
         n = len(sents)
         try:
             vec    = TfidfVectorizer(stop_words="english")
@@ -566,8 +586,7 @@ def smart_trim(text: str, length_choice: str) -> str:
             scores = cosine_similarity(tfidf, tfidf).sum(axis=1)
         except Exception:
             scores = np.ones(n)
-
-        n_zones = max(3, min(8, limit // 16))
+        n_zones = max(4, min(12, limit // 20))
         zone_sz = max(1, n // n_zones)
         picked: set = set()
         for z in range(n_zones):
@@ -576,23 +595,20 @@ def smart_trim(text: str, length_choice: str) -> str:
             if start >= n: break
             best = max(range(start, end), key=lambda i: scores[i])
             picked.add(best)
-
         result: list = []; wc = 0
         for idx in sorted(picked):
             sw = len(sents[idx].split())
-            if wc + sw > int(limit * 1.15): break
+            if wc + sw > int(limit * 1.10): break
             result.append(sents[idx]); wc += sw
-
-        if wc < limit * 0.75:
+        if wc < limit * 0.80:
             unused = sorted([i for i in range(n) if i not in picked],
                             key=lambda i: scores[i], reverse=True)
             for idx in unused:
                 sw = len(sents[idx].split())
-                if wc + sw > int(limit * 1.15): continue
+                if wc + sw > int(limit * 1.10): continue
                 result.append(sents[idx]); wc += sw
                 if wc >= limit * 0.90: break
             result.sort(key=lambda s: sents.index(s))
-
         return " ".join(result) if result else " ".join(words[:limit])
     except Exception:
         return " ".join(words[:limit])
@@ -624,7 +640,8 @@ def _dedup(text: str) -> str:
             sim = len(w & ew) / max(len(w), len(ew))
             if sim >= 0.55: dup = True; break
             if len(c & ec) >= 6 and sim >= 0.35: dup = True; break
-        if not dup: kept.append(s); ks.append((w, c))
+        if not dup:
+            kept.append(s); ks.append((w, c))
     return " ".join(kept)
 
 
@@ -635,11 +652,17 @@ def _cap(text: str, max_w: int, strict: bool = False) -> str:
         s = s.strip()
         if not s: continue
         wc = len(s.split())
-        if n == 0:   out.append(s); n += wc
-        elif n >= max_w: break
-        elif n + wc <= max_w + grace: out.append(s); n += wc
-        else: break
-    return " ".join(out) if out else " ".join(text.split()[:max_w])
+        if n == 0:
+            out.append(s); n += wc
+        elif n >= max_w:
+            break
+        elif n + wc <= max_w + grace:
+            out.append(s); n += wc
+            if n >= max_w: break
+        else:
+            break
+    if out: return " ".join(out)
+    return " ".join(text.split()[:max_w])
 
 
 def _ensure_complete_sentences(text: str) -> str:
@@ -656,7 +679,8 @@ def _enforce_sentence_end(text: str) -> str:
     text = text.strip()
     if not text or text[-1] in ".!?": return text
     last_end = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
-    if last_end > len(text) * 0.35: return text[:last_end + 1].strip()
+    if last_end > len(text) * 0.35:
+        return text[:last_end + 1].strip()
     return text
 
 
@@ -668,7 +692,8 @@ def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> s
     try:
         sents = _sent_tok(text)
         sents = [s.strip() for s in sents
-                 if len(s.split()) >= 8 and not _is_bad_sentence(s.strip())
+                 if len(s.split()) >= 8
+                 and not _is_bad_sentence(s.strip())
                  and s.split()[0].lower().rstrip(",") not in _BAD_START]
         if not sents:
             sents = [s.strip() for s in _sent_tok(text) if len(s.split()) >= 5]
@@ -690,7 +715,8 @@ def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> s
         _S2    = {"the","a","an","is","are","was","of","in","to","and","or","it","for","with"}
 
         if zone_based:
-            n = len(sents); zone_sz = max(1, n // top_n)
+            n       = len(sents)
+            zone_sz = max(1, n // top_n)
             kept: list = []; kept_w: list = []
             for z in range(top_n):
                 start = z * zone_sz
@@ -698,7 +724,8 @@ def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> s
                 if start >= n: break
                 best = max(range(start, end), key=lambda i: scores[i])
                 sw   = set(sents[best].lower().split()) - _S2
-                if not any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.60 for ew in kept_w):
+                if not any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.60
+                           for ew in kept_w):
                     kept.append(best); kept_w.append(sw)
             return " ".join(sents[i] for i in sorted(kept)) if kept else ""
         else:
@@ -709,29 +736,34 @@ def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> s
                 if not any(len(w & ew) / max(len(w), len(ew)) >= 0.60 for ew, _ in ks):
                     kept.append(idx); ks.append((w, c))
             return " ".join(sents[i] for i in sorted(kept))
+
     except Exception as exc:
         print(f"[WARN] extractive_summary: {exc}"); return ""
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SHORT MODE  (zero model calls — always < 1s)
+# SHORT MODE
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _short_summary(cleaned: str, out_cap: int) -> str:
     try:
         sents = _sent_tok(cleaned)
         sents = [s.strip() for s in sents
-                 if len(s.split()) >= 8 and not _is_bad_sentence(s.strip())
+                 if len(s.split()) >= 8
+                 and not _is_bad_sentence(s.strip())
                  and s.split()[0].lower().rstrip(",") not in _BAD_START]
         if not sents:
             sents = [s.strip() for s in _sent_tok(cleaned) if len(s.split()) >= 6]
-        if not sents: return " ".join(cleaned.split()[:out_cap])
+        if not sents:
+            return " ".join(cleaned.split()[:out_cap])
 
         n_zones = 4
         if len(sents) <= n_zones:
             result = _dedup(" ".join(sents))
             result = _cap(result, out_cap, strict=True)
-            return _ensure_complete_sentences(_RE_WS.sub(" ", result).strip())
+            result = _ensure_complete_sentences(result)
+            result = _RE_WS.sub(" ", result).strip()
+            return result[0].upper() + result[1:] if result and not result[0].isupper() else result
 
         try:
             vec    = TfidfVectorizer(stop_words="english")
@@ -741,7 +773,7 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
             scores = np.array([min(len(s.split()), 30) for s in sents], dtype=float)
 
         n = len(sents); zone_sz = max(1, n // n_zones)
-        _STOP = {"the","a","an","is","are","was","of","in","to","and","or","it","for","with"}
+        _STOP   = {"the","a","an","is","are","was","of","in","to","and","or","it","for","with"}
         picked: list = []; picked_w: list = []
 
         for z in range(n_zones):
@@ -753,7 +785,8 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
             cands = sorted(cands, key=lambda i: scores[i], reverse=True)
             for idx in cands:
                 sw = set(sents[idx].lower().split()) - _STOP
-                if any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.55 for ew in picked_w): continue
+                if any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.55 for ew in picked_w):
+                    continue
                 picked.append(idx); picked_w.append(sw); break
 
         if len(picked) < 2:
@@ -764,7 +797,8 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
                     picked.append(idx); picked_w.append(sw)
 
         result = " ".join(sents[i] for i in sorted(picked))
-        result = _dedup(result); result = _cap(result, out_cap, strict=True)
+        result = _dedup(result)
+        result = _cap(result, out_cap, strict=True)
         result = _ensure_complete_sentences(result)
         result = _RE_WS.sub(" ", result).strip()
         return result[0].upper() + result[1:] if result and not result[0].isupper() else result
@@ -772,7 +806,8 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
     except Exception as exc:
         print(f"[WARN] _short_summary: {exc}")
         ext   = extractive_summary(cleaned, top_n=4, zone_based=True)
-        return _cap(ext or " ".join(cleaned.split()[:out_cap]), out_cap, strict=True)
+        final = ext or " ".join(cleaned.split()[:out_cap])
+        return _cap(final, out_cap, strict=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -785,22 +820,23 @@ def _is_hallucinated(text: str) -> bool:
     if n < 8: return False
     score = 0
     ur = len(set(w)) / n
-    if ur < 0.45: score += 3
-    elif ur < 0.55: score += 1
+    if ur < 0.45:     score += 3
+    elif ur < 0.55:   score += 1
     cd = sum(1 for i in range(n - 1) if w[i] == w[i + 1])
-    if cd >= 2: score += 3
+    if cd >= 2:   score += 3
     elif cd >= 1: score += 2
     sw = sum(1 for x in w if len(x) <= 2) / n
-    if sw > 0.35: score += 3
-    elif sw > 0.28: score += 2
+    if sw > 0.35:     score += 3
+    elif sw > 0.28:   score += 2
     tg = [tuple(w[i:i + 3]) for i in range(n - 2)]
     if tg:
         mr = max(tg.count(t) for t in set(tg))
-        if mr >= 3: score += 3
+        if mr >= 3:   score += 3
         elif mr >= 2: score += 1
     clean = [re.sub(r"[^a-z]", "", x) for x in w]
     freq  = Counter(x for x in clean if len(x) > 4)
-    if any(cnt >= (3 if n < 50 else 4) for cnt in freq.values()): return True
+    limit = 3 if n < 50 else 4
+    if any(cnt >= limit for cnt in freq.values()): return True
     return score >= 2
 
 
@@ -817,26 +853,23 @@ def _fix_output(text: str) -> str:
 def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_choice):
     if not text.strip(): return ""
     wc       = len(text.split())
-    safe_min = min(min_len, max(10, wc // 4))
-    safe_min = min(safe_min, MAX_NEW_TOKENS.get(length_choice, 90) // 2)  # clamp
-    mnt      = MAX_NEW_TOKENS.get(length_choice, 90)
+    safe_min = min(min_len, max(10, wc // 3))
+    mnt      = MAX_NEW_TOKENS.get(length_choice, 300)
     inp      = ("summarize: " + text) if model_choice == "T5" else text
     try:
-        enc = tokenizer(inp, return_tensors="pt",
-                        max_length=TOKENIZER_MAX_LEN, truncation=True, padding=False)
+        enc = tokenizer(inp, return_tensors="pt", max_length=1926,
+                        truncation=True, padding=False)
         enc = {k: v.to("cpu") for k, v in enc.items()}
-        with torch.inference_mode():        # ~5% faster than no_grad on CPU
+        with torch.no_grad():
             out = model.generate(
-                enc["input_ids"],
-                attention_mask=enc["attention_mask"],
-                num_beams=1,               # greedy decode — fastest possible
-                do_sample=False,
-                early_stopping=True,
-                min_length=safe_min,
-                max_new_tokens=mnt,
-                no_repeat_ngram_size=3,    # prevents repetition
-                length_penalty=0.8,        # slightly below 1 → ends sooner
-            )
+               enc["input_ids"],
+               attention_mask=enc["attention_mask"],
+              do_sample=False,          # greedy decoding
+              num_beams=1,              # keep 1
+              use_cache=True,           # 🔥 IMPORTANT SPEED BOOST
+              max_new_tokens=mnt,
+              no_repeat_ngram_size=3,
+              )
         raw = tokenizer.decode(out[0], skip_special_tokens=True,
                                clean_up_tokenization_spaces=True).strip()
         return _enforce_sentence_end(raw)
@@ -854,38 +887,33 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
     if tokenizer is None or model is None:
         return "Model not loaded. Please restart the app."
 
-    raw_wc = len(input_text.split())
-
-    # ── Speed fix #1: pre-sample long docs BEFORE clean_input() ───────────────
-    # For a 2000-word PDF: clean_input() runs 150+ regex checks on 150+ lines.
-    # _fast_presample() reduces to 300-500 words in O(n) pure Python — instant.
-    target = PRESAMPLE_TARGET.get(length_choice, 400)
-    if raw_wc > target:
-        input_text = _fast_presample(input_text, target)
-
+    raw_wc  = len(input_text.split())
     cleaned = clean_input(input_text, short_input=raw_wc < 120)
     if len(cleaned.split()) < 8:
         cleaned = _RE_WS.sub(" ", input_text).strip()
     if len(cleaned.split()) < 5:
         return "Text too short. Please provide more content."
 
-    if len(cleaned.split()) > MAX_CLEAN_WORDS:
-        cleaned = _fast_presample(cleaned, MAX_CLEAN_WORDS)
+    cw = cleaned.split()
+    if len(cw) > MAX_CLEAN_WORDS:
+        n   = MAX_CLEAN_WORDS; n_s = int(n * 0.40); n_e = int(n * 0.20); n_m = n - n_s - n_e
+        mid = len(cw) // 2
+        cleaned = " ".join(cw[:n_s] + cw[mid - n_m // 2: mid + n_m // 2] + cw[len(cw) - n_e:])
 
     wc   = len(cleaned.split())
     cfg  = LENGTH_SETTINGS[length_choice]
     base = OUTPUT_CAPS[length_choice]
 
     if wc < 100:
-        out_cap = max(20, int(wc * 0.55))
+        out_cap = max(25, int(wc * 0.50))
     elif wc < 200:
-        ratios  = {"Short": 0.55, "Medium": 0.62, "Detailed": 0.72}
-        mins    = {"Short": 35,   "Medium": 65,   "Detailed": 100}
+        ratios  = {"Short": 0.55, "Medium": 0.65, "Detailed": 0.75}
+        mins    = {"Short": 40,   "Medium": 70,   "Detailed": 100}
         out_cap = min(base, max(mins[length_choice], int(wc * ratios[length_choice])))
     else:
         out_cap = base
 
-    ext_top = 3 if wc < 200 else (5 if wc < 500 else (7 if wc < 1500 else 10))
+    ext_top = 3 if wc < 200 else (5 if wc < 500 else (8 if wc < 1500 else 12))
 
     if length_choice == "Short":
         return _short_summary(cleaned, out_cap)
@@ -896,11 +924,12 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
     ai_out  = _filter_output(_fix_output(raw_out)) if raw_out else ""
     if not ai_out and raw_out: ai_out = _fix_output(raw_out)
     if _is_hallucinated(ai_out): ai_out = ""
-    if ai_out and wc > 250 and len(ai_out.split()) > 0.70 * wc: ai_out = ""
+    if ai_out and wc > 250 and len(ai_out.split()) > 0.65 * wc: ai_out = ""
 
     ai_wc   = len(ai_out.split()) if ai_out else 0
     ext     = extractive_summary(cleaned, top_n=ext_top)
-    tgt_min = int(wc * 0.40) if wc < 200 else {"Medium": 55, "Detailed": 90}[length_choice]
+    tgt_min = (int(wc * 0.45) if wc < 200
+               else {"Medium": 80, "Detailed": 150}[length_choice])
 
     if ai_wc >= tgt_min:
         if length_choice == "Detailed":
@@ -933,7 +962,7 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
         elif ext:               final = ext
         else:                   final = ai_out or ""
 
-    if length_choice == "Detailed" and len(final.split()) < 100:
+    if length_choice == "Detailed" and len(final.split()) < 150:
         pool = [s.strip() for s in _sent_tok(cleaned)
                 if len(s.split()) >= 8 and not _is_bad_sentence(s.strip())
                 and s.split()[0].lower().rstrip(",") not in _BAD_START]
@@ -941,7 +970,8 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
         for x in pool:
             if len(final.split()) >= out_cap: break
             xw = set(x.lower().split())
-            if len(xw & existing) / max(len(xw), 1) < 0.75 and not _is_bad_sentence(x):
+            if (len(xw & existing) / max(len(xw), 1) < 0.75
+                    and not _is_bad_sentence(x)):
                 final = final + " " + x; existing.update(xw)
 
     if not final or not final.strip():
@@ -949,7 +979,7 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
 
     final = _filter_output(final)
     if not final.strip(): final = ext or ai_out or ""
-    if not final.strip(): return "Could not generate a summary."
+    if not final.strip(): return "Could not generate a summary. Please try with more text."
 
     final = _dedup(final)
     final = _cap(final, out_cap, strict=False)
