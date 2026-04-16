@@ -19,6 +19,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 # ── PDF Cleaning ───────────────────────────────────────────────────────────────
 def _clean_pdf_text(text):
     """7-step pipeline to fix common PDF extraction artifacts."""
