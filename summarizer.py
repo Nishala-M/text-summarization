@@ -170,12 +170,9 @@ def _has_title_merge(s: str) -> bool:
             if not any(fw in _COMMON_VERBS for fw in first_four):
                 return True
     return False
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # MODEL DOWNLOADING & LOADING  ← FIXED
 # ═════════════════════════════════════════════════════════════════════════════
-
 def _is_model_ready(path: str) -> bool:
     """Return True only when config.json AND a weights file exist at path root."""
     if not os.path.isdir(path):
@@ -183,8 +180,6 @@ def _is_model_ready(path: str) -> bool:
     files = os.listdir(path)
     return "config.json" in files and (
         "model.safetensors" in files or "pytorch_model.bin" in files)
-
-
 def _get_model_type(path: str) -> str:
     """
     Read config.json to determine the actual model_type stored in the folder.
@@ -198,8 +193,6 @@ def _get_model_type(path: str) -> str:
         return cfg.get("model_type", "unknown").lower()
     except Exception:
         return "unknown"
-
-
 def _find_model_root(search_dir: str) -> str | None:
     """
     Find the directory containing BOTH config.json AND model weights.
@@ -216,23 +209,18 @@ def _find_model_root(search_dir: str) -> str | None:
         return None
     candidates.sort(key=lambda p: len(p))
     return candidates[0]
-
-
 def _download_model_folder(folder_id: str, output_path: str) -> bool:
     """Download Google Drive folder. Finds actual model root after download."""
     if _is_model_ready(output_path):
         print(f"[INFO] Model already present at {output_path}")
         return True
-
     print(f"[INFO] Downloading model {folder_id} → {output_path} ...")
     tmp_dir = output_path + "_tmp_dl"
     try:
         if os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir)
         os.makedirs(tmp_dir, exist_ok=True)
-
         gdown.download_folder(id=folder_id, output=tmp_dir, quiet=False, use_cookies=False)
-
         model_src = _find_model_root(tmp_dir)
         if model_src is None:
             all_files = []
@@ -242,46 +230,35 @@ def _download_model_folder(folder_id: str, output_path: str) -> bool:
             print(f"[ERROR] No model weights found. Files: {all_files[:20]}")
             shutil.rmtree(tmp_dir)
             return False
-
         print(f"[INFO] Using model source: {model_src}")
         if os.path.exists(output_path):
             shutil.rmtree(output_path)
         shutil.copytree(model_src, output_path)
         shutil.rmtree(tmp_dir)
-
         ok = _is_model_ready(output_path)
         print(f"[INFO] Model {'ready' if ok else 'INCOMPLETE'} at {output_path}")
         print(f"[INFO] Files: {os.listdir(output_path)}")
         return ok
-
     except Exception as exc:
         print(f"[ERROR] Download failed ({output_path}): {exc}")
         if os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir)
         return False
-
-
 def _quantize(model):
     return torch.quantization.quantize_dynamic(
         model, {torch.nn.Linear}, dtype=torch.qint8)
-
-
 def _load_tokenizer_robust(path: str, expected_type: str):
     """
     Load tokenizer robustly regardless of what tokenizer_config.json says.
-
     Problem: Google Drive folders mix up tokenizer files — the BART folder
     has T5Tokenizer in tokenizer_config, and the T5 folder has BartTokenizer
     in tokenizer_config. This causes direct from_pretrained() calls to fail.
-
     Fix: Read the actual model_type from config.json and force-load the
     correct tokenizer class, ignoring tokenizer_config.json's class field.
     """
     import json
-
     actual_type = _get_model_type(path)
     print(f"[INFO] config.json model_type={actual_type}, expected={expected_type}")
-
     # Strategy 1: Try the correct tokenizer for this model type directly
     if actual_type == "t5" or expected_type == "t5":
         # For T5: find the spiece.model file (may be in a subfolder)
@@ -290,7 +267,6 @@ def _load_tokenizer_robust(path: str, expected_type: str):
             if "spiece.model" in files:
                 spiece_path = os.path.join(root, "spiece.model")
                 break
-
         if spiece_path:
             print(f"[INFO] Found spiece.model at {spiece_path}")
             try:
@@ -299,7 +275,6 @@ def _load_tokenizer_robust(path: str, expected_type: str):
                 return tok
             except Exception as e:
                 print(f"[WARN] Direct spiece load failed: {e}")
-
         # Try loading from a subfolder that has the T5 tokenizer files
         for root, dirs, files in os.walk(path):
             if "tokenizer.json" in files and "tokenizer_config.json" in files:
@@ -313,7 +288,6 @@ def _load_tokenizer_robust(path: str, expected_type: str):
                         return tok
                 except Exception:
                     pass
-
     if actual_type == "bart" or expected_type == "bart":
         try:
             tok = BartTokenizer.from_pretrained(path)
@@ -321,7 +295,6 @@ def _load_tokenizer_robust(path: str, expected_type: str):
             return tok
         except Exception as e:
             print(f"[WARN] BartTokenizer direct failed: {e}")
-
     # Strategy 2: AutoTokenizer — ignores tokenizer_class field mismatches
     try:
         tok = AutoTokenizer.from_pretrained(path)
@@ -331,8 +304,6 @@ def _load_tokenizer_robust(path: str, expected_type: str):
         print(f"[WARN] AutoTokenizer failed: {e}")
 
     raise RuntimeError(f"Could not load any tokenizer from {path}")
-
-
 def load_bart():
     """Load BART model and tokenizer. Handles tokenizer_config mismatch."""
     try:
@@ -340,25 +311,19 @@ def load_bart():
             print("[ERROR] BART download failed."); return None, None
         if not _is_model_ready(BART_PATH):
             print("[ERROR] BART files missing."); return None, None
-
         print(f"[INFO] Loading BART from {BART_PATH}")
         print(f"[INFO] Files: {os.listdir(BART_PATH)}")
-
         tok = _load_tokenizer_robust(BART_PATH, "bart")
-
         # Load model directly as BART (avoids AutoModel class-lookup failure)
         mod = BartForConditionalGeneration.from_pretrained(
             BART_PATH, torch_dtype=torch.float32, ignore_mismatched_sizes=True)
         mod.eval()
         print("[INFO] BART loaded successfully.")
         return tok, _quantize(mod)
-
     except Exception as exc:
         print(f"[ERROR] BART load failed: {exc}")
         import traceback; traceback.print_exc()
         return None, None
-
-
 def load_t5():
     """
     Load T5 model and tokenizer.
@@ -370,12 +335,9 @@ def load_t5():
             print("[ERROR] T5 download failed."); return None, None
         if not _is_model_ready(T5_PATH):
             print("[ERROR] T5 files missing."); return None, None
-
         print(f"[INFO] Loading T5 from {T5_PATH}")
         print(f"[INFO] Files: {os.listdir(T5_PATH)}")
-
         tok = _load_tokenizer_robust(T5_PATH, "t5")
-
         # Load model — T5 config.json is correct so AutoModel works fine
         try:
             mod = T5ForConditionalGeneration.from_pretrained(
@@ -383,26 +345,19 @@ def load_t5():
         except Exception:
             mod = AutoModelForSeq2SeqLM.from_pretrained(
                 T5_PATH, torch_dtype=torch.float32)
-
         mod.eval()
         print("[INFO] T5 loaded successfully.")
         return tok, _quantize(mod)
-
     except Exception as exc:
         print(f"[ERROR] T5 load failed: {exc}")
         import traceback; traceback.print_exc()
         return None, None
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # UTILITIES
 # ═════════════════════════════════════════════════════════════════════════════
-
 def _sent_tok(text: str) -> list:
     try:    return nltk.sent_tokenize(text)
     except: return [text]
-
-
 def has_metadata(t: str) -> bool:
     tl = t.lower()
     return bool(
@@ -410,12 +365,9 @@ def has_metadata(t: str) -> bool:
         or _RE_INST.search(tl) or _RE_ETAL.search(tl)
         or _RE_EMAIL.search(t)
     )
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # SENTENCE QUALITY FILTER
 # ═════════════════════════════════════════════════════════════════════════════
-
 def _is_bad_sentence(s: str) -> bool:
     s = s.strip()
     w = s.split()
@@ -439,12 +391,9 @@ def _is_bad_sentence(s: str) -> bool:
     if re.search(r",\s+[A-Z][a-z]{3,}\.?\s*$", s) and len(w) < 20: return True
     if _has_title_merge(s): return True
     return False
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # RESEARCH PAPER HELPERS
 # ═════════════════════════════════════════════════════════════════════════════
-
 def is_research_paper(text: str) -> bool:
     sample = text[:5000]
     score  = sum(1 for p in [
@@ -453,8 +402,6 @@ def is_research_paper(text: str) -> bool:
         r'arXiv', r'\bProceedings\b',
     ] if re.search(p, sample, re.IGNORECASE))
     return score >= 2
-
-
 def _is_academic_noise(s: str) -> bool:
     if len(_RE_CITATION_INLINE.findall(s)) >= 2: return True
     if _RE_HYPHEN_INITIAL.search(s): return True
@@ -464,12 +411,9 @@ def _is_academic_noise(s: str) -> bool:
     if _RE_ADVANTAGE_LBL.search(s) and len(s.split()) < 30: return True
     if re.match(r'^\d+[,\.\s]', s.strip()) and len(s.split()) < 15: return True
     return False
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # INPUT CLEANING
 # ═════════════════════════════════════════════════════════════════════════════
-
 def _strip_refs(text: str) -> str:
     _RE_REF_LINE = re.compile(
         r'^\[\d+\]|^\d+\.\s+[A-Z][a-z]+.*(?:IEEE|ACM|vol\.|pp\.|Journal)',
@@ -482,8 +426,6 @@ def _strip_refs(text: str) -> str:
         if _RE_REF_LINE.match(s): continue
         out.append(_RE_LABEL.sub("", line))
     return "\n".join(out)
-
-
 def _is_header(line: str) -> bool:
     s = line.strip(); w = s.split()
     if not w: return False
@@ -494,8 +436,6 @@ def _is_header(line: str) -> bool:
         caps = sum(1 for x in w if x and x[0].isupper()) / len(w)
         if caps >= 0.55 and ":" in s: return True
     return False
-
-
 def clean_input(text: str, short_input: bool = False) -> str:
     if is_research_paper(text):
         text = re.sub(r'\s*\[\d+\]\s*', ' ', text)
@@ -511,11 +451,9 @@ def clean_input(text: str, short_input: bool = False) -> str:
         text = re.sub(r'\.(\s*\.)+', '.', text)
         text = re.sub(r',\s*,', ',', text)
         text = re.sub(r'\s{2,}', ' ', text)
-
     text  = _strip_refs(text)
     lines = text.split("\n"); kept = []
     min_wc = 5 if short_input else 7
-
     for line in lines:
         line = line.strip()
         if not line or _is_header(line): continue
@@ -532,7 +470,6 @@ def clean_input(text: str, short_input: bool = False) -> str:
             if (si + ni) / max(len(words), 1) >= 0.35: continue
         if re.match(r"^\[\d+\]", line): continue
         kept.append(line)
-
     _DANGLING = {
         "for","and","or","of","in","to","with","by","a","an","the","that",
         "which","this","these","those","its","their","as","at","on","from",
@@ -555,7 +492,6 @@ def clean_input(text: str, short_input: bool = False) -> str:
                 merged[-1] = merged[-1].rstrip().rstrip(",:;") + "."
         merged.append(line)
     text = " ".join(merged)
-
     text = _RE_HYPHEN.sub("", text)
     text = _RE_WS.sub(" ", text)
     text = _RE_NONASCII.sub(" ", text)
@@ -564,12 +500,9 @@ def clean_input(text: str, short_input: bool = False) -> str:
     text = re.sub(r"\.([A-Za-z])", r". \1", text)
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     return text.strip()
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # SMART TRIM  (zone-based)
 # ═════════════════════════════════════════════════════════════════════════════
-
 def smart_trim(text: str, length_choice: str) -> str:
     limit = INPUT_WORD_LIMIT.get(length_choice, 150)
     words = text.split()
@@ -612,8 +545,6 @@ def smart_trim(text: str, length_choice: str) -> str:
         return " ".join(result) if result else " ".join(words[:limit])
     except Exception:
         return " ".join(words[:limit])
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # OUTPUT UTILITIES
 # ═════════════════════════════════════════════════════════════════════════════
@@ -623,8 +554,6 @@ def _filter_output(text: str) -> str:
     if not good: return text
     out = _RE_WS.sub(" ", " ".join(good)).strip()
     return out[0].upper() + out[1:] if out and out[0].islower() else out
-
-
 def _dedup(text: str) -> str:
     _STOP = {
         "the","a","an","is","are","was","were","of","in","to","and","or",
@@ -643,8 +572,6 @@ def _dedup(text: str) -> str:
         if not dup:
             kept.append(s); ks.append((w, c))
     return " ".join(kept)
-
-
 def _cap(text: str, max_w: int, strict: bool = False) -> str:
     sents = _sent_tok(text); out: list = []; n = 0
     grace = 0 if strict else min(8, int(max_w * 0.05))
@@ -663,8 +590,6 @@ def _cap(text: str, max_w: int, strict: bool = False) -> str:
             break
     if out: return " ".join(out)
     return " ".join(text.split()[:max_w])
-
-
 def _ensure_complete_sentences(text: str) -> str:
     text = text.strip()
     if not text: return text
@@ -673,8 +598,6 @@ def _ensure_complete_sentences(text: str) -> str:
     complete = [s.strip() for s in sents if s.strip() and s.strip()[-1] in ".!?"]
     if complete: return " ".join(complete)
     return text.rstrip(",;: ") + "."
-
-
 def _enforce_sentence_end(text: str) -> str:
     text = text.strip()
     if not text or text[-1] in ".!?": return text
@@ -682,12 +605,9 @@ def _enforce_sentence_end(text: str) -> str:
     if last_end > len(text) * 0.35:
         return text[:last_end + 1].strip()
     return text
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # EXTRACTIVE SUMMARY
 # ═════════════════════════════════════════════════════════════════════════════
-
 def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> str:
     try:
         sents = _sent_tok(text)
@@ -713,7 +633,6 @@ def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> s
         tfidf  = vec.fit_transform(sents)
         scores = cosine_similarity(tfidf, tfidf).sum(axis=1)
         _S2    = {"the","a","an","is","are","was","of","in","to","and","or","it","for","with"}
-
         if zone_based:
             n       = len(sents)
             zone_sz = max(1, n // top_n)
@@ -736,15 +655,11 @@ def extractive_summary(text: str, top_n: int = 5, zone_based: bool = False) -> s
                 if not any(len(w & ew) / max(len(w), len(ew)) >= 0.60 for ew, _ in ks):
                     kept.append(idx); ks.append((w, c))
             return " ".join(sents[i] for i in sorted(kept))
-
     except Exception as exc:
         print(f"[WARN] extractive_summary: {exc}"); return ""
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # SHORT MODE
 # ═════════════════════════════════════════════════════════════════════════════
-
 def _short_summary(cleaned: str, out_cap: int) -> str:
     try:
         sents = _sent_tok(cleaned)
@@ -756,7 +671,6 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
             sents = [s.strip() for s in _sent_tok(cleaned) if len(s.split()) >= 6]
         if not sents:
             return " ".join(cleaned.split()[:out_cap])
-
         n_zones = 4
         if len(sents) <= n_zones:
             result = _dedup(" ".join(sents))
@@ -764,7 +678,6 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
             result = _ensure_complete_sentences(result)
             result = _RE_WS.sub(" ", result).strip()
             return result[0].upper() + result[1:] if result and not result[0].isupper() else result
-
         try:
             vec    = TfidfVectorizer(stop_words="english")
             tfidf  = vec.fit_transform(sents)
@@ -775,7 +688,6 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
         n = len(sents); zone_sz = max(1, n // n_zones)
         _STOP   = {"the","a","an","is","are","was","of","in","to","and","or","it","for","with"}
         picked: list = []; picked_w: list = []
-
         for z in range(n_zones):
             start = z * zone_sz
             end   = min(n, start + zone_sz) if z < n_zones - 1 else n
@@ -788,14 +700,12 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
                 if any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.55 for ew in picked_w):
                     continue
                 picked.append(idx); picked_w.append(sw); break
-
         if len(picked) < 2:
             for idx in np.argsort(scores)[::-1]:
                 if len(picked) >= n_zones: break
                 sw = set(sents[idx].lower().split()) - _STOP
                 if not any(len(sw & ew) / max(len(sw), len(ew), 1) >= 0.55 for ew in picked_w):
                     picked.append(idx); picked_w.append(sw)
-
         result = " ".join(sents[i] for i in sorted(picked))
         result = _dedup(result)
         result = _cap(result, out_cap, strict=True)
@@ -808,12 +718,9 @@ def _short_summary(cleaned: str, out_cap: int) -> str:
         ext   = extractive_summary(cleaned, top_n=4, zone_based=True)
         final = ext or " ".join(cleaned.split()[:out_cap])
         return _cap(final, out_cap, strict=True)
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # AI GENERATION
 # ═════════════════════════════════════════════════════════════════════════════
-
 def _is_hallucinated(text: str) -> bool:
     if not text: return False
     w = text.lower().split(); n = len(w)
@@ -838,8 +745,6 @@ def _is_hallucinated(text: str) -> bool:
     limit = 3 if n < 50 else 4
     if any(cnt >= limit for cnt in freq.values()): return True
     return score >= 2
-
-
 def _fix_output(text: str) -> str:
     text = re.sub(r"^summarize\s*:\s*", "", text.strip(), flags=re.IGNORECASE)
     exp  = {"AI": "Artificial Intelligence","ML": "Machine Learning",
@@ -848,8 +753,6 @@ def _fix_output(text: str) -> str:
     if m and m.group(2) in exp:
         text = _RE_ACRONYM.sub(exp[m.group(2)] + " (" + m.group(2) + ")", text, count=1)
     return text[0].upper() + text[1:] if text and text[0].islower() else text
-
-
 def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_choice):
     if not text.strip(): return ""
     wc       = len(text.split())
@@ -875,35 +778,25 @@ def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_
         return _enforce_sentence_end(raw)
     except Exception as exc:
         print(f"[ERROR] AI generation: {exc}"); return ""
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# MAIN ENTRY POINT
-# ═════════════════════════════════════════════════════════════════════════════
-
 def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
     if not input_text or not input_text.strip():
         return "Please enter some text to summarize."
     if tokenizer is None or model is None:
         return "Model not loaded. Please restart the app."
-
     raw_wc  = len(input_text.split())
     cleaned = clean_input(input_text, short_input=raw_wc < 120)
     if len(cleaned.split()) < 8:
         cleaned = _RE_WS.sub(" ", input_text).strip()
     if len(cleaned.split()) < 5:
         return "Text too short. Please provide more content."
-
     cw = cleaned.split()
     if len(cw) > MAX_CLEAN_WORDS:
         n   = MAX_CLEAN_WORDS; n_s = int(n * 0.40); n_e = int(n * 0.20); n_m = n - n_s - n_e
         mid = len(cw) // 2
         cleaned = " ".join(cw[:n_s] + cw[mid - n_m // 2: mid + n_m // 2] + cw[len(cw) - n_e:])
-
     wc   = len(cleaned.split())
     cfg  = LENGTH_SETTINGS[length_choice]
     base = OUTPUT_CAPS[length_choice]
-
     if wc < 100:
         out_cap = max(25, int(wc * 0.50))
     elif wc < 200:
@@ -912,12 +805,9 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
         out_cap = min(base, max(mins[length_choice], int(wc * ratios[length_choice])))
     else:
         out_cap = base
-
     ext_top = 3 if wc < 200 else (5 if wc < 500 else (8 if wc < 1500 else 12))
-
     if length_choice == "Short":
         return _short_summary(cleaned, out_cap)
-
     trimmed = smart_trim(cleaned, length_choice)
     raw_out = _ai_generate(trimmed, tokenizer, model, model_choice,
                            cfg["min_length"], cfg["max_length"], length_choice)
@@ -925,12 +815,10 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
     if not ai_out and raw_out: ai_out = _fix_output(raw_out)
     if _is_hallucinated(ai_out): ai_out = ""
     if ai_out and wc > 250 and len(ai_out.split()) > 0.65 * wc: ai_out = ""
-
     ai_wc   = len(ai_out.split()) if ai_out else 0
     ext     = extractive_summary(cleaned, top_n=ext_top)
     tgt_min = (int(wc * 0.45) if wc < 200
                else {"Medium": 80, "Detailed": 150}[length_choice])
-
     if ai_wc >= tgt_min:
         if length_choice == "Detailed":
             ai_sents = [set(x.lower().split()) for x in _sent_tok(ai_out)]
@@ -961,7 +849,6 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
         elif base_t:            final = base_t
         elif ext:               final = ext
         else:                   final = ai_out or ""
-
     if length_choice == "Detailed" and len(final.split()) < 150:
         pool = [s.strip() for s in _sent_tok(cleaned)
                 if len(s.split()) >= 8 and not _is_bad_sentence(s.strip())
@@ -973,14 +860,11 @@ def generate_summary(input_text, tokenizer, model, model_choice, length_choice):
             if (len(xw & existing) / max(len(xw), 1) < 0.75
                     and not _is_bad_sentence(x)):
                 final = final + " " + x; existing.update(xw)
-
     if not final or not final.strip():
         return "Could not generate a summary. Please try with more text."
-
     final = _filter_output(final)
     if not final.strip(): final = ext or ai_out or ""
     if not final.strip(): return "Could not generate a summary. Please try with more text."
-
     final = _dedup(final)
     final = _cap(final, out_cap, strict=False)
     final = _ensure_complete_sentences(final)
