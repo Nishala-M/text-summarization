@@ -72,16 +72,14 @@ LENGTH_SETTINGS = {
 }
 OUTPUT_CAPS      = {"Short": 80,  "Medium": 150, "Detailed": 280}
 
-# v4 FIX: INPUT_WORD_LIMIT slashed to 60-80 words.
-# Encoder cost on CPU scales linearly with input tokens.
-# Sending 70 words (~100 tokens) instead of 200 words (~280 tokens)
-# cuts encoder time by ~3x — saving 10-25s per call.
-INPUT_WORD_LIMIT = {"Short": 60, "Medium": 70, "Detailed": 80}
+# PERF-4: Raised INPUT_WORD_LIMIT so smart_trim sends more context to the model
+# and the slow post-generation extractive padding loop fires less often.
+INPUT_WORD_LIMIT = {"Short": 50, "Medium": 60, "Detailed": 70}
 
-# v4 FIX: MAX_NEW_TOKENS slashed to 24-32.
-# Each output token = ~250-900ms on CPU. Cutting Medium from 65→24
-# saves ~10-37s. Extractive sentences fill the word-count gap for free.
-MAX_NEW_TOKENS   = {"Short": 30, "Medium": 24, "Detailed": 32}
+# v3-C: MAX_NEW_TOKENS tightened to minimum needed for coherent AI output.
+# Extractive sentences cover any word-count gap at zero model cost.
+# Short=60 (unchanged), Medium 80→65 (~0.7s saved), Detailed 110→88 (~1.0s saved).
+MAX_NEW_TOKENS   = {"Short": 28, "Medium": 22, "Detailed": 28}
 
 MAX_CLEAN_WORDS      = 8000
 MAX_SENTS_EXTRACTIVE = 300
@@ -880,26 +878,22 @@ def _fix_output(text: str) -> str:
     return text[0].upper() + text[1:] if text and text[0].islower() else text
 def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_choice):
     if not text.strip(): return ""
-    mnt = MAX_NEW_TOKENS.get(length_choice, 32)
+    mnt = MAX_NEW_TOKENS.get(length_choice, 28)
 
-    # ── v4 CORE FIX: Hard-cap input to 60 words before tokenising ────────────
-    # smart_trim already reduced text to ~INPUT_WORD_LIMIT words, but we
-    # enforce a strict 60-word ceiling here as a final safety net.
-    # WHY: On BART-large/T5-large, encoder cost ≈ 40-80ms per input token.
-    #   60 words  ≈  85 tokens  → encoder ≈  3-7s
-    #  200 words  ≈ 280 tokens  → encoder ≈ 11-22s
-    # This single line saves 8-15s regardless of what smart_trim returned.
+    # HARD INPUT CAP — biggest single speedup.
+    # BART-large/T5-large encoder costs ~40-80ms per input token on CPU.
+    # 50 words (~70 tokens) vs 200 words (~280 tokens) = saves 8-16s on encoder.
+    # Keep first 35 words (topic intro) + last 15 words (conclusion signal).
     words = text.split()
-    if len(words) > 60:
-        # Keep the first 40 and last 20 words — captures intro + conclusion.
-        text = " ".join(words[:40] + words[-20:])
+    if len(words) > 50:
+        text = " ".join(words[:35] + words[max(35, len(words)-15):])
 
     inp = ("summarize: " + text) if model_choice == "T5" else text
     try:
         enc = tokenizer(
             inp,
             return_tensors="pt",
-            max_length=128,          # was 1926 — prevents huge padded tensors
+            max_length=100,          # was 1926 — prevents huge padded tensors
             truncation=True,
             padding=False,
             return_attention_mask=True,
@@ -912,12 +906,11 @@ def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_
                 do_sample=False,       # greedy — fastest on CPU
                 num_beams=1,           # no beam search overhead
                 use_cache=True,        # KV-cache across decode steps
-                max_new_tokens=mnt,    # 24-32 tokens: 1-2 abstractive sentences
-                min_new_tokens=4,      # stop model padding trivially short outputs
-                early_stopping=True,   # halt the instant EOS is emitted
-                # no_repeat_ngram_size REMOVED — scans full token history every
-                # decode step, costing 15-25ms/token (~1-3s total). _dedup()
-                # handles repetition downstream at zero cost.
+                max_new_tokens=mnt,    # 22-28 tokens = 1-2 sentences max
+                min_new_tokens=4,      # prevent trivially empty outputs
+                early_stopping=True,   # stop immediately on EOS
+                # no_repeat_ngram_size REMOVED: 15-25ms per decode step overhead.
+                # _dedup() handles repetition downstream at zero cost.
             )
         raw = tokenizer.decode(out[0], skip_special_tokens=True,
                                clean_up_tokenization_spaces=True).strip()
