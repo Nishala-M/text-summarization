@@ -195,9 +195,27 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 
 /* File uploader */
 [data-testid="stFileUploader"]{background:#fafbff!important;
-    border:2px dashed var(--border)!important;border-radius:10px!important;}
-[data-testid="stFileUploader"]:hover{border-color:var(--accent)!important;}
-
+    border:2px dashed var(--border)!important;border-radius:12px!important;
+    padding:.8rem 1rem!important;transition:border-color .2s!important;}
+[data-testid="stFileUploader"]:hover{border-color:var(--accent)!important;
+    background:rgba(79,70,229,.02)!important;}
+/* File name row after upload */
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"]{
+    background:#ffffff!important;border:1px solid var(--border)!important;
+    border-radius:8px!important;padding:.5rem .8rem!important;
+    box-shadow:0 1px 4px rgba(79,70,229,.07)!important;}
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"]{
+    color:var(--text)!important;font-size:.85rem!important;font-weight:500!important;}
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFileData"]{
+    color:var(--muted)!important;font-size:.75rem!important;}
+/* ✕ delete button */
+[data-testid="stFileUploader"] [data-testid="stBaseButton-minimal"],
+[data-testid="stFileUploader"] button[kind="minimal"]{
+    background:rgba(239,68,68,.1)!important;color:#ef4444!important;
+    border:1px solid rgba(239,68,68,.25)!important;border-radius:6px!important;
+    padding:.25rem .5rem!important;}
+[data-testid="stFileUploader"] [data-testid="stBaseButton-minimal"]:hover{
+    background:rgba(239,68,68,.2)!important;}
 /* Upload button — accent background + white text */
 [data-testid="stFileUploader"] button,
 [data-testid="stFileUploaderDropzoneInput"] + button,
