@@ -289,15 +289,7 @@ section[data-testid="stSidebar"]{
     box-shadow:2px 0 16px rgba(79,70,229,.08)!important;}
 section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;}
 
-/* Sidebar toggle — force always visible using exact Streamlit 1.57 class */
-[data-testid="stSidebarCollapseButton"],
-div.eelgd2m10,
-[class*="eelgd2m"] {
-    display: inline !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-}
+
 
 /* Progress */
 .stProgress>div>div{background:linear-gradient(90deg,var(--accent),var(--accent2))!important;
@@ -371,6 +363,45 @@ div[data-testid="stDownloadButton"]{display:flex!important;justify-content:cente
 hr{border-color:var(--border)!important;}
 </style>
 """, unsafe_allow_html=True)
+
+# ── Sidebar Restore Button (JS injection) ─────────────────────────────────────
+import streamlit.components.v1 as components
+components.html("""
+<script>
+(function() {
+    function injectToggle() {
+        var pdoc = window.parent.document;
+        if (pdoc.getElementById('_sb_toggle')) return;
+        var btn = pdoc.createElement('button');
+        btn.id = '_sb_toggle';
+        btn.innerHTML = '\u276F';
+        btn.title = 'Open Sidebar';
+        btn.style.cssText = 'position:fixed;top:50%;left:0;transform:translateY(-50%);'
+            + 'z-index:999999;background:#e8eaf6;color:#4f46e5;'
+            + 'border:1.5px solid #c8cde8;border-left:none;border-radius:0 8px 8px 0;'
+            + 'padding:10px 7px;font-size:14px;font-weight:900;cursor:pointer;'
+            + 'box-shadow:2px 2px 8px rgba(79,70,229,.2);line-height:1;display:none;';
+        btn.onmouseenter = function(){ btn.style.background='#d0d4f0'; };
+        btn.onmouseleave = function(){ btn.style.background='#e8eaf6'; };
+        btn.onclick = function() {
+            var collapseBtn = pdoc.querySelector('[data-testid="stSidebarCollapseButton"] button');
+            if (collapseBtn) { collapseBtn.click(); }
+        };
+        pdoc.body.appendChild(btn);
+        function checkState() {
+            var s = pdoc.querySelector('[data-testid="stSidebar"]');
+            if (!s) return;
+            var collapsed = s.offsetWidth < 80;
+            btn.style.display = collapsed ? 'block' : 'none';
+        }
+        setInterval(checkState, 300);
+        checkState();
+    }
+    setTimeout(injectToggle, 800);
+    setTimeout(injectToggle, 2000);
+})();
+</script>
+""", height=0)
 
 # ── Session State ──────────────────────────────────────────────────────────────
 _DEFAULTS = {
