@@ -885,15 +885,15 @@ def _ai_generate(text, tokenizer, model, model_choice, min_len, max_len, length_
     # 50 words (~70 tokens) vs 200 words (~280 tokens) = saves 8-16s on encoder.
     # Keep first 35 words (topic intro) + last 15 words (conclusion signal).
     words = text.split()
-    if len(words) > 50:
-        text = " ".join(words[:35] + words[max(35, len(words)-15):])
+    if len(words) > 400:
+        text = " ".join(words[:280] + words[max(280, len(words)-120):])
 
     inp = ("summarize: " + text) if model_choice == "T5" else text
     try:
         enc = tokenizer(
             inp,
             return_tensors="pt",
-            max_length=100,          # was 1926 — prevents huge padded tensors
+            max_length=512,          # was 1926 — prevents huge padded tensors
             truncation=True,
             padding=False,
             return_attention_mask=True,
