@@ -289,6 +289,21 @@ section[data-testid="stSidebar"]{
     box-shadow:2px 0 16px rgba(79,70,229,.08)!important;}
 section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;}
 
+/* Sidebar toggle — always visible, styled to match theme */
+[data-testid="collapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    background: #e8eaf6 !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 0 8px 8px 0 !important;
+    box-shadow: 2px 0 8px rgba(79,70,229,.10) !important;
+}
+[data-testid="collapsedControl"] svg {
+    color: var(--accent) !important;
+    fill: var(--accent) !important;
+}
+
 /* Progress */
 .stProgress>div>div{background:linear-gradient(90deg,var(--accent),var(--accent2))!important;
     border-radius:50px!important;}
@@ -299,9 +314,7 @@ section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;
     border:1px solid var(--border)!important;font-size:.85rem!important;color:var(--text)!important;}
 .streamlit-expanderContent{background:#fafbff!important;border:1px solid var(--border)!important;
     border-top:none!important;border-radius:0 0 10px 10px!important;}
-button[data-testid="collapsedControl"] {
-    display: none !important;
-}
+
 /* Download button */
 [data-testid="stDownloadButton"]>button{
     background:linear-gradient(135deg,#4f46e5,#6d64f5)!important;color:#ffffff!important;
