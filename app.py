@@ -207,19 +207,22 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 [data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"]{
     background:transparent!important;
     width:100%!important;box-sizing:border-box!important;}
-/* File name row after upload */
+/* File name row after upload — full width, no black icon */
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFile"]{
-    background:#f0f2fc!important;border:1px solid var(--border)!important;
+    background:#eef0f9!important;border:1px solid var(--border)!important;
     border-radius:8px!important;padding:.6rem .9rem!important;
     box-shadow:0 1px 4px rgba(79,70,229,.07)!important;
-    width:100%!important;box-sizing:border-box!important;}
-/* File icon background — override dark icon box */
-[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > div:first-child,
-[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] span[data-testid="stFileUploaderFileIcon"],
-[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > span:first-child {
-    background:rgba(79,70,229,.12)!important;
-    color:var(--accent)!important;
-    border-radius:6px!important;}
+    width:100%!important;box-sizing:border-box!important;
+    display:flex!important;align-items:center!important;}
+/* Kill the black icon box completely */
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > div:first-child {
+    background:#dde0f5!important;
+    border-radius:6px!important;
+    color:var(--accent)!important;}
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > div:first-child svg,
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > div:first-child svg path {
+    fill:var(--accent)!important;
+    color:var(--accent)!important;}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"]{
     color:#1a1d2e!important;font-size:.85rem!important;font-weight:600!important;}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFileData"]{
@@ -229,6 +232,11 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 [data-testid="stFileUploader"] p,
 [data-testid="stFileUploader"] span:not([data-testid]){
     color:#1a1d2e!important;}
+/* Make file row wrapper also stretch full width */
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFileList"],
+[data-testid="stFileUploader"] > div,
+[data-testid="stFileUploader"] section > div {
+    width:100%!important;box-sizing:border-box!important;}
 /* ✕ delete button */
 [data-testid="stFileUploader"] [data-testid="stBaseButton-minimal"],
 [data-testid="stFileUploader"] button[kind="minimal"]{
