@@ -289,13 +289,16 @@ section[data-testid="stSidebar"]{
     box-shadow:2px 0 16px rgba(79,70,229,.08)!important;}
 section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;}
 
-/* Sidebar toggle — always visible, styled to match theme */
-[data-testid="collapsedControl"],
-button[data-testid="collapsedControl"],
-[data-testid="stSidebarCollapsedControl"],
-button[data-testid="stSidebarCollapsedControl"],
-.st-emotion-cache-1rtdyuf,
-.st-emotion-cache-1rs6os {
+/* Sidebar toggle — always visible, pinned to left edge */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapseButton"] button {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+[data-testid="stSidebarCollapsed"] [data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsed"] [data-testid="stSidebarCollapseButton"] button {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
@@ -308,14 +311,11 @@ button[data-testid="stSidebarCollapsedControl"],
     border: 1px solid var(--border) !important;
     border-left: none !important;
     border-radius: 0 8px 8px 0 !important;
-    box-shadow: 2px 0 8px rgba(79,70,229,.15) !important;
+    box-shadow: 2px 2px 8px rgba(79,70,229,.18) !important;
     padding: 0.5rem 0.35rem !important;
     cursor: pointer !important;
 }
-[data-testid="collapsedControl"] svg,
-button[data-testid="collapsedControl"] svg,
-[data-testid="stSidebarCollapsedControl"] svg,
-button[data-testid="stSidebarCollapsedControl"] svg {
+[data-testid="stSidebarCollapseButton"] svg {
     color: var(--accent) !important;
     fill: var(--accent) !important;
     width: 1rem !important;
