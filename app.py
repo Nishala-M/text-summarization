@@ -290,18 +290,36 @@ section[data-testid="stSidebar"]{
 section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;}
 
 /* Sidebar toggle — always visible, styled to match theme */
-[data-testid="collapsedControl"] {
+[data-testid="collapsedControl"],
+button[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[data-testid="stSidebarCollapsedControl"],
+.st-emotion-cache-1rtdyuf,
+.st-emotion-cache-1rs6os {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
+    pointer-events: auto !important;
+    position: fixed !important;
+    top: 50% !important;
+    left: 0 !important;
+    z-index: 999999 !important;
     background: #e8eaf6 !important;
     border: 1px solid var(--border) !important;
+    border-left: none !important;
     border-radius: 0 8px 8px 0 !important;
-    box-shadow: 2px 0 8px rgba(79,70,229,.10) !important;
+    box-shadow: 2px 0 8px rgba(79,70,229,.15) !important;
+    padding: 0.5rem 0.35rem !important;
+    cursor: pointer !important;
 }
-[data-testid="collapsedControl"] svg {
+[data-testid="collapsedControl"] svg,
+button[data-testid="collapsedControl"] svg,
+[data-testid="stSidebarCollapsedControl"] svg,
+button[data-testid="stSidebarCollapsedControl"] svg {
     color: var(--accent) !important;
     fill: var(--accent) !important;
+    width: 1rem !important;
+    height: 1rem !important;
 }
 
 /* Progress */
