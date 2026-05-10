@@ -679,7 +679,7 @@ if run_btn:
 
                     prog.progress(10)
                     en_text, translated = translate_to_english(input_text, lang_code)
-
+                    print(f"[DEBUG] en_text (first 300): {en_text[:300]}")
                     prog.progress(30)
                     print(f"[DEBUG] en_text preview: {en_text[:200]}")
                     summary_en = generate_summary(
