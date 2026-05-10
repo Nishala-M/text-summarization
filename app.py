@@ -193,21 +193,42 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 .stSelectbox>div>div{background:#ffffff!important;border:1.5px solid var(--border)!important;
     border-radius:10px!important;color:var(--text)!important;box-shadow:var(--shadow)!important;}
 
-/* File uploader */
-[data-testid="stFileUploader"]{background:#fafbff!important;
+/* File uploader — full width, theme-safe */
+[data-testid="stFileUploader"]{
+    background:#ffffff!important;
     border:2px dashed var(--border)!important;border-radius:12px!important;
-    padding:.8rem 1rem!important;transition:border-color .2s!important;}
-[data-testid="stFileUploader"]:hover{border-color:var(--accent)!important;
+    padding:1.2rem 1.2rem!important;transition:border-color .2s!important;
+    width:100%!important;box-sizing:border-box!important;}
+[data-testid="stFileUploader"]:hover{
+    border-color:var(--accent)!important;
     background:rgba(79,70,229,.02)!important;}
+/* Dropzone inner area */
+[data-testid="stFileUploader"] section,
+[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"]{
+    background:transparent!important;
+    width:100%!important;box-sizing:border-box!important;}
 /* File name row after upload */
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFile"]{
-    background:#ffffff!important;border:1px solid var(--border)!important;
-    border-radius:8px!important;padding:.5rem .8rem!important;
-    box-shadow:0 1px 4px rgba(79,70,229,.07)!important;}
+    background:#f0f2fc!important;border:1px solid var(--border)!important;
+    border-radius:8px!important;padding:.6rem .9rem!important;
+    box-shadow:0 1px 4px rgba(79,70,229,.07)!important;
+    width:100%!important;box-sizing:border-box!important;}
+/* File icon background — override dark icon box */
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > div:first-child,
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] span[data-testid="stFileUploaderFileIcon"],
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"] > span:first-child {
+    background:rgba(79,70,229,.12)!important;
+    color:var(--accent)!important;
+    border-radius:6px!important;}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"]{
-    color:var(--text)!important;font-size:.85rem!important;font-weight:500!important;}
+    color:#1a1d2e!important;font-size:.85rem!important;font-weight:600!important;}
 [data-testid="stFileUploader"] [data-testid="stFileUploaderFileData"]{
-    color:var(--muted)!important;font-size:.75rem!important;}
+    color:#5a6080!important;font-size:.75rem!important;}
+/* Drag-and-drop label text */
+[data-testid="stFileUploader"] label,
+[data-testid="stFileUploader"] p,
+[data-testid="stFileUploader"] span:not([data-testid]){
+    color:#1a1d2e!important;}
 /* ✕ delete button */
 [data-testid="stFileUploader"] [data-testid="stBaseButton-minimal"],
 [data-testid="stFileUploader"] button[kind="minimal"]{
@@ -216,7 +237,7 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
     padding:.25rem .5rem!important;}
 [data-testid="stFileUploader"] [data-testid="stBaseButton-minimal"]:hover{
     background:rgba(239,68,68,.2)!important;}
-/* Upload button — accent background + white text */
+/* Browse / Upload button */
 [data-testid="stFileUploader"] button,
 [data-testid="stFileUploaderDropzoneInput"] + button,
 [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"],
@@ -247,6 +268,10 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] span{
     color:#ffffff!important;
 }
+/* Tab panel full width so uploader stretches */
+.stTabs [data-baseweb="tab-panel"]{
+    padding-top:1rem!important;
+    width:100%!important;box-sizing:border-box!important;}
 
 /* Result box */
 .result-box{background:linear-gradient(135deg,rgba(79,70,229,.06),rgba(5,150,105,.04));
