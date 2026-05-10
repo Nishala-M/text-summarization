@@ -1,6 +1,3 @@
-# app.py — SummarAI Final Production Version
-# AI-Based Explainable Text Summarization System
-
 import streamlit as st
 import pdfplumber
 import time
@@ -8,9 +5,7 @@ import io
 import re
 from summarizer import load_bart, load_t5, generate_summary, clean_input
 from explainability import get_important_sentences
-from translator import (SUPPORTED_LANGUAGES, translate_to_english,
-                        translate_from_english, is_available)
-
+from translator import (SUPPORTED_LANGUAGES, translate_to_english, translate_from_english, is_available)
 # ── Page Config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="SummarAI — Intelligent Text Summarizer",
@@ -18,18 +13,14 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="auto",
 )
-
-
 # ── PDF Cleaning ───────────────────────────────────────────────────────────────
 def _clean_pdf_text(text):
     """7-step pipeline to fix common PDF extraction artifacts."""
     # 1. Remove lone page numbers and form feeds
     text = re.sub(r'\n\s*\d+\s*\n', '\n', text)
     text = re.sub(r'\f', '\n', text)
-
     # 2. Fix hyphenated line breaks: "impor-\ntant" → "important"
     text = re.sub(r'-(\s*\n\s*)', '', text)
-
     # 3. Join broken lines (wrapped text from PDF columns)
     lines  = text.split('\n')
     joined = []
@@ -58,28 +49,21 @@ def _clean_pdf_text(text):
         joined.append(line)
         i += 1
     text = '\n'.join(joined)
-
     # 4. Fix missing spaces after punctuation
     text = re.sub(r',([^\s\d])', r', \1', text)
     text = re.sub(r'\.([A-Za-z])', r'. \1', text)
-
     # 5. Split merged sentences: "limits trust, To address" → "limits trust. To address"
     text = re.sub(r',\s+([A-Z][a-z])', lambda m: '. ' + m.group(1), text)
-
     # 6. Fix camelCase joins from PDF font encoding
     text = re.sub(r'([a-z])([A-Z])', r'\1 \2', text)
-
     # 7. Normalize whitespace
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
-
     return text.strip()
-
 # ── CSS Styles ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Inter:wght@300;400;500;600&display=swap');
-
 :root {
     --bg:      #eef0f9; --bg2: #ffffff; --bg3: #e4e7f5;
     --border:  #c8cde8; --accent: #4f46e5; --accent2: #e8458a;
@@ -109,7 +93,6 @@ p,span,label,div,h1,h2,h3,h4,h5,h6,[data-testid="stMarkdownContainer"],
 html,body,[class*="css"]{font-family:'Inter',sans-serif!important;background-color:#eef0f9!important;color:#1a1d2e!important;}
 .main .block-container{padding:2rem 2.5rem 4rem;max-width:1200px;}
 #MainMenu,footer,header{visibility:hidden;}.stDeployButton{display:none;}
-
 /* Hero */
 .hero{text-align:center;padding:2.8rem 1rem 1.8rem;
     background:linear-gradient(135deg,rgba(79,70,229,.07),rgba(232,69,138,.05));
@@ -130,18 +113,15 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif!important;background-col
     border-radius:50px;padding:6px 16px;font-size:.78rem;color:var(--muted);
     display:flex;align-items:center;gap:5px;box-shadow:0 2px 8px rgba(79,70,229,.08);}
 .stat-pill span{color:var(--accent);font-weight:600;}
-
 /* Section titles */
 .card-title{font-family:'Syne',sans-serif;font-size:.68rem;font-weight:700;
     letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
     margin-bottom:.8rem;display:flex;align-items:center;gap:7px;}
 .card-title::before{content:'';display:inline-block;width:3px;height:11px;
     background:var(--accent);border-radius:2px;}
-
 /* Input */
 .input-wrapper{background:#ffffff;border:1.5px solid var(--border);border-radius:16px;
     padding:1.3rem 1.5rem 1.1rem;box-shadow:var(--shadow);margin-bottom:.8rem;}
-
 /* Tabs */
 .stTabs [data-baseweb="tab-list"]{background:var(--bg3)!important;border-radius:9px!important;
     gap:4px!important;padding:4px!important;border:1px solid var(--border)!important;
@@ -157,7 +137,6 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif!important;background-col
 .stTabs [aria-selected="true"] p,.stTabs [aria-selected="true"] span,
 .stTabs [aria-selected="true"] div{color:white!important;}
 .stTabs [data-baseweb="tab-panel"]{padding-top:1rem!important;}
-
 /* Textarea */
 .stTextArea textarea{background:#fafbff!important;border:1.5px solid var(--border)!important;
     border-radius:10px!important;color:var(--text)!important;font-family:'Inter',sans-serif!important;
@@ -167,7 +146,6 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif!important;background-col
     box-shadow:0 0 0 3px rgba(79,70,229,.1)!important;outline:none!important;}
 .stTextArea textarea::placeholder{color:#b0b7c5!important;}
 [data-baseweb="textarea"],[data-baseweb="base-input"]{border:none!important;box-shadow:none!important;}
-
 /* Buttons */
 .stButton>button{background:linear-gradient(135deg,var(--accent),#6d64f5)!important;
     color:#ffffff!important;border:none!important;border-radius:10px!important;
@@ -188,11 +166,9 @@ html,body,[class*="css"]{font-family:'Inter',sans-serif!important;background-col
 .btn-clear .stButton>button div{color:#ef4444!important;}
 div[data-testid="stColumn"] div[data-testid="stButton"],
 div[data-testid="stButton"]{display:flex!important;justify-content:center!important;}
-
 /* Selectbox */
 .stSelectbox>div>div{background:#ffffff!important;border:1.5px solid var(--border)!important;
     border-radius:10px!important;color:var(--text)!important;box-shadow:var(--shadow)!important;}
-
 /* File uploader — full width, theme-safe */
 [data-testid="stFileUploader"]{
     background:#ffffff!important;
@@ -280,7 +256,6 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 .stTabs [data-baseweb="tab-panel"]{
     padding-top:1rem!important;
     width:100%!important;box-sizing:border-box!important;}
-
 /* Result box */
 .result-box{background:linear-gradient(135deg,rgba(79,70,229,.06),rgba(5,150,105,.04));
     border:1.5px solid rgba(79,70,229,.2);border-radius:16px;padding:1.6rem;
@@ -288,14 +263,12 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 .result-box::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
     background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3));}
 .result-text{font-size:.97rem;line-height:1.85;color:var(--text);}
-
 /* Stats */
 .stats-bar{display:flex;gap:.8rem;flex-wrap:wrap;margin-top:.8rem;}
 .stat-chip{background:#ffffff;border:1px solid var(--border);border-radius:8px;
     padding:5px 13px;font-size:.76rem;color:var(--muted);
     box-shadow:0 1px 4px rgba(79,70,229,.06);}
 .stat-chip b{color:var(--accent3);}
-
 /* Key sentences */
 .explain-box{background:#ffffff;border:1px solid var(--border);border-radius:10px;
     padding:1rem 1.3rem;margin-bottom:.5rem;border-left:3px solid var(--accent);
@@ -305,7 +278,6 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
     background:linear-gradient(135deg,rgba(79,70,229,.03),rgba(232,69,138,.02));}
 .explain-num{font-family:'Syne',sans-serif;font-size:.65rem;font-weight:700;
     color:var(--accent);letter-spacing:.1em;margin-bottom:.25rem;text-transform:uppercase;}
-
 /* Model badges */
 .model-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
     border-radius:6px;font-size:.72rem;font-family:'Syne',sans-serif;
@@ -314,27 +286,21 @@ div[data-testid="stButton"]{display:flex!important;justify-content:center!import
 .badge-t5{background:rgba(5,150,105,.12);color:var(--accent3);border:1px solid rgba(5,150,105,.3);}
 .badge-ok{background:rgba(5,150,105,.12);color:var(--accent3);border:1px solid rgba(5,150,105,.3);}
 .badge-err{background:rgba(232,69,138,.12);color:var(--accent2);border:1px solid rgba(232,69,138,.3);}
-
 /* Sidebar */
 section[data-testid="stSidebar"]{
     background:linear-gradient(180deg,#e8eaf6 0%,#eceef8 100%)!important;
     border-right:1px solid var(--border)!important;
     box-shadow:2px 0 16px rgba(79,70,229,.08)!important;}
 section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;}
-
-
-
 /* Progress */
 .stProgress>div>div{background:linear-gradient(90deg,var(--accent),var(--accent2))!important;
     border-radius:50px!important;}
 .stProgress>div{background:var(--bg3)!important;border-radius:50px!important;}
-
 /* Expander */
 .streamlit-expanderHeader{background:#ffffff!important;border-radius:10px!important;
     border:1px solid var(--border)!important;font-size:.85rem!important;color:var(--text)!important;}
 .streamlit-expanderContent{background:#fafbff!important;border:1px solid var(--border)!important;
     border-top:none!important;border-radius:0 0 10px 10px!important;}
-
 /* Download button */
 [data-testid="stDownloadButton"]>button{
     background:linear-gradient(135deg,#4f46e5,#6d64f5)!important;color:#ffffff!important;
@@ -352,7 +318,6 @@ section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;
 [data-testid="stDownloadButton"]>button div,[data-testid="stDownloadButton"]>button *{
     color:#ffffff!important;text-shadow:0 1px 4px rgba(0,0,0,0.4)!important;}
 div[data-testid="stDownloadButton"]{display:flex!important;justify-content:center!important;}
-
 /* Layout helpers */
 .sec-div{height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);margin:2rem 0;}
 .summary-section{background:linear-gradient(135deg,rgba(79,70,229,.04),rgba(232,69,138,.02));
@@ -366,7 +331,6 @@ div[data-testid="stDownloadButton"]{display:flex!important;justify-content:cente
     letter-spacing:.1em;text-transform:uppercase;color:#9ca8c8;margin-bottom:.4rem;}
 .empty-sub{font-size:.8rem;line-height:1.7;color:#9ca8c8;}
 .empty-sub b{color:var(--accent);opacity:.7;}
-
 /* Info cards */
 .info-card{background:#ffffff;border:1px solid var(--border);border-radius:14px;
     padding:1.2rem 1.4rem;box-shadow:var(--shadow);height:100%;}
@@ -377,7 +341,6 @@ div[data-testid="stDownloadButton"]{display:flex!important;justify-content:cente
 .info-card .tag{display:inline-block;background:rgba(79,70,229,.09);color:var(--accent);
     border-radius:5px;padding:1px 8px;font-size:.72rem;font-weight:600;margin-right:4px;margin-top:6px;}
 .info-card .tag-green{background:rgba(5,150,105,.09);color:var(--accent3);}
-
 /* Steps */
 .step-row{display:flex;align-items:flex-start;gap:12px;padding:.65rem .9rem;
     background:#ffffff;border:1px solid var(--border);border-radius:10px;
@@ -387,7 +350,6 @@ div[data-testid="stDownloadButton"]{display:flex!important;justify-content:cente
     display:flex;align-items:center;justify-content:center;margin-top:1px;}
 .step-text{font-size:.85rem;color:var(--text);line-height:1.6;}
 .step-text b{color:var(--accent);}
-
 /* Scrollbar */
 ::-webkit-scrollbar{width:5px;}
 ::-webkit-scrollbar-track{background:var(--bg3);}
@@ -396,8 +358,6 @@ div[data-testid="stDownloadButton"]{display:flex!important;justify-content:cente
 hr{border-color:var(--border)!important;}
 </style>
 """, unsafe_allow_html=True)
-
-# ── Sidebar Restore Button (JS injection) ─────────────────────────────────────
 import streamlit.components.v1 as components
 components.html("""
 <script>
@@ -435,7 +395,6 @@ components.html("""
 })();
 </script>
 """, height=0)
-
 # ── Session State ──────────────────────────────────────────────────────────────
 _DEFAULTS = {
     "history": [], "last_summary": "", "last_input": "",
@@ -445,18 +404,12 @@ _DEFAULTS = {
 for k, v in _DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
-
 # ── Model Loading ──────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_models():
     return load_bart(), load_t5()
-
 with st.spinner("Loading AI models..."):
     (bart_tok, bart_mod), (t5_tok, t5_mod) = load_models()
-
-# ══════════════════════════════════════════════════════════════
-#  SIDEBAR
-# ══════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("""
     <div style='text-align:center;padding:.5rem 0 1.5rem;'>
@@ -470,7 +423,6 @@ with st.sidebar:
             Intelligent Summarizer
         </div>
     </div>""", unsafe_allow_html=True)
-
     st.markdown('<div class="card-title">Model Status</div>', unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
@@ -479,14 +431,12 @@ with st.sidebar:
     with c2:
         ok = t5_mod is not None
         st.markdown(f'<div class="model-badge {"badge-ok" if ok else "badge-err"}">{"✓" if ok else "✗"} T5</div>', unsafe_allow_html=True)
-
     st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
     st.markdown('<div class="card-title">⚙ Settings</div>', unsafe_allow_html=True)
     model_choice  = st.selectbox("AI Model", ["BART", "T5"],
                                   help="BART: Better for articles & reports. T5: General text.")
     length_choice = st.select_slider("Summary Length",
                                       options=["Short", "Medium", "Detailed"], value="Medium")
-
     st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
     st.markdown('<div class="card-title">🌐 Language</div>', unsafe_allow_html=True)
     lang_choice = st.selectbox("Input/Output Language", list(SUPPORTED_LANGUAGES.keys()),
@@ -498,10 +448,8 @@ with st.sidebar:
             f'border:1px solid rgba(5,150,105,.2);border-radius:8px;padding:6px 10px;margin-top:4px;">'
             f'🔄 Auto-translate: {lang_choice} ↔ English</div>',
             unsafe_allow_html=True)
-
     show_explain = st.toggle("Show Key Sentences", value=True)
     show_history = st.toggle("Show History Panel", value=True)
-
     st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
     st.markdown('<div class="card-title">📊 Session Stats</div>', unsafe_allow_html=True)
     avg = round(st.session_state.total_reduced / st.session_state.total_runs) \
@@ -511,7 +459,6 @@ with st.sidebar:
         <div class='stat-chip'>Summaries: <b>{st.session_state.total_runs}</b></div>
         <div class='stat-chip'>Avg reduction: <b>{avg}%</b></div>
     </div>""", unsafe_allow_html=True)
-
     st.markdown("<hr style='border-color:#c8cde8;margin:1.2rem 0'>", unsafe_allow_html=True)
     st.markdown('<div class="card-title">📖 Length Guide</div>', unsafe_allow_html=True)
     st.markdown("""
@@ -523,10 +470,6 @@ with st.sidebar:
         <b style='color:#1a1d2e'>Detailed</b> — 150–280 words<br>
         Abstractive + Extractive · ~15s
     </div>""", unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════
-#  HERO
-# ══════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="hero">
     <div class="hero-badge">✦ AI-Powered · Explainable · Multi-Model</div>
@@ -543,10 +486,6 @@ st.markdown("""
         <div class="stat-pill">🔍 <span>Explainable</span> Output</div>
     </div>
 </div>""", unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════
-#  ABOUT SECTION
-# ══════════════════════════════════════════════════════════════
 with st.expander("🧠  About the AI Models & How to Use", expanded=False):
     col1, col2 = st.columns(2, gap="medium")
     with col1:
@@ -583,7 +522,6 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
                 <span class='tag tag-green'>60M parameters</span>
             </div>
         </div>""", unsafe_allow_html=True)
-
     st.markdown("<div style='margin-top:1.2rem;'>", unsafe_allow_html=True)
     st.markdown("<div class='card-title'>Summary Length Modes</div>", unsafe_allow_html=True)
     col3, col4, col5 = st.columns(3, gap="medium")
@@ -629,7 +567,6 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
             <div class='step-text'>{text}</div>
         </div>""", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
-
     st.markdown("""
     <div style='background:rgba(79,70,229,.05);border:1px solid rgba(79,70,229,.15);
                 border-radius:12px;padding:1rem 1.3rem;margin-top:1rem;'>
@@ -645,17 +582,12 @@ with st.expander("🧠  About the AI Models & How to Use", expanded=False):
             ✦ &nbsp;Use <b>History panel</b> to compare BART vs T5 outputs side by side
         </div>
     </div>""", unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════════════
-#  INPUT
-# ══════════════════════════════════════════════════════════════
 st.markdown('<div class="sec-div"></div>', unsafe_allow_html=True)
 st.markdown('<div class="card-title">📥 Input</div>', unsafe_allow_html=True)
 
 input_text = ""
 st.markdown('<div class="input-wrapper">', unsafe_allow_html=True)
 tab_text, tab_pdf = st.tabs(["✏  Paste Text", "📄  Upload PDF"])
-
 with tab_text:
     txt = st.text_area("Paste text here", height=300,
                        placeholder="Paste your article, report, research paper or any text here...",
@@ -666,7 +598,6 @@ with tab_text:
         st.markdown(
             f'<div style="font-size:.74rem;color:#9ca3af;text-align:right;margin-top:.3rem">'
             f'{wc:,} words</div>', unsafe_allow_html=True)
-        # Translation preview for non-English input
         if lang_choice != "English" and wc >= 5:
             lang_code = SUPPORTED_LANGUAGES.get(lang_choice, "en")
             with st.spinner(f"Translating {lang_choice} → English..."):
@@ -683,7 +614,6 @@ with tab_text:
                         {preview}{'...' if len(txt) > 1000 else ''}
                     </div>
                 </div>""", unsafe_allow_html=True)
-
 with tab_pdf:
     uploaded = st.file_uploader("Upload PDF", type=["pdf"], label_visibility="collapsed")
     if uploaded:
@@ -712,31 +642,22 @@ with tab_pdf:
                     f'{pdf_text[:500]}...</div>', unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Could not read PDF: {e}")
-
 st.markdown('</div>', unsafe_allow_html=True)
-
-# ── Buttons ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 div[data-testid="stButton"]{display:flex!important;justify-content:center!important;}
 </style>""", unsafe_allow_html=True)
-
 _, btn_col, _ = st.columns([1, 2, 1])
 with btn_col:
     run_btn = st.button("✦  Generate Summary", use_container_width=True)
     st.markdown('<div class="btn-clear">', unsafe_allow_html=True)
     clr_btn = st.button("✕  Clear", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
-
 if clr_btn:
     for k in ["last_summary", "last_input", "last_input_clean",
               "summary_native", "summary_english"]:
         st.session_state[k] = ""
     st.rerun()
-
-# ══════════════════════════════════════════════════════════════
-#  SUMMARIZATION PIPELINE  ← ONLY THIS BLOCK WAS CHANGED
-# ══════════════════════════════════════════════════════════════
 if run_btn:
     if not input_text or not input_text.strip():
         st.warning("Please enter or upload some text first.")
@@ -750,17 +671,14 @@ if run_btn:
             try:
                 with st.spinner(f"Summarizing with {model_choice}..."):
                     lang_code = SUPPORTED_LANGUAGES.get(lang_choice, "en")
-
                     prog.progress(10)
                     en_text, translated = translate_to_english(input_text, lang_code)
-
                     prog.progress(30)
                     # Normalize whitespace only — do NOT strip non-ASCII here;
                     # en_text is already English after translation
                     en_text_clean = re.sub(r'\s+', ' ', en_text).strip()
                     summary_en = generate_summary(
                         en_text_clean, tok, mod, model_choice, length_choice)
-
                     prog.progress(88)
                     if lang_choice != "English":
                         summary_native = translate_from_english(summary_en, lang_code)
@@ -773,11 +691,9 @@ if run_btn:
                         st.session_state.summary_native  = ""
                         st.session_state.summary_english = ""
                         st.session_state.lang_choice_run = "English"
-
                     prog.progress(100)
             finally:
                 prog.empty()
-
             in_wc  = len(input_text.split())
             out_wc = len(summary.split())
             pct    = round((1 - out_wc / max(in_wc, 1)) * 100)
@@ -794,25 +710,17 @@ if run_btn:
             if len(st.session_state.history) > 6:
                 st.session_state.history.pop()
             st.rerun()
-
-# ══════════════════════════════════════════════════════════════
-#  OUTPUT
-# ══════════════════════════════════════════════════════════════
 if st.session_state.last_summary:
     summary = st.session_state.last_summary
     in_wc   = len(st.session_state.last_input.split())
     out_wc  = len(summary.split())
     pct     = round((1 - out_wc / max(in_wc, 1)) * 100)
-
     st.markdown('<div class="sec-div"></div>', unsafe_allow_html=True)
     st.markdown('<div class="summary-section">', unsafe_allow_html=True)
     st.markdown('<div class="card-title">📤 Summary</div>', unsafe_allow_html=True)
-
     badge = "badge-bart" if model_choice == "BART" else "badge-t5"
     st.markdown(f'<div class="model-badge {badge}" style="margin-bottom:.7rem">'
                 f'✦ {model_choice} · {length_choice}</div>', unsafe_allow_html=True)
-
-    # Bilingual output for multilingual mode
     if st.session_state.summary_native and st.session_state.lang_choice_run != "English":
         native_lang = st.session_state.lang_choice_run
         st.markdown(f"""
@@ -837,7 +745,6 @@ if st.session_state.last_summary:
     else:
         st.markdown(f'<div class="result-box"><div class="result-text">{summary}</div></div>',
                     unsafe_allow_html=True)
-
     st.markdown(f"""
     <div class="stats-bar">
         <div class="stat-chip">📥 Input <b>{in_wc:,}</b> words</div>
@@ -845,8 +752,6 @@ if st.session_state.last_summary:
         <div class="stat-chip">📉 Reduced by <b>{pct}%</b></div>
     </div>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
-
-    # Download button
     st.markdown("<div style='margin-top:.8rem'>", unsafe_allow_html=True)
     _, dl_col, _ = st.columns([1, 2, 1])
     with dl_col:
@@ -860,8 +765,6 @@ if st.session_state.last_summary:
                            data=dl_content, file_name="summary.txt",
                            mime="text/plain", use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
-
-    # Key sentences
     if show_explain:
         st.markdown('<div class="sec-div"></div>', unsafe_allow_html=True)
         st.markdown('<div class="keysent-section">', unsafe_allow_html=True)
@@ -880,8 +783,6 @@ if st.session_state.last_summary:
         except Exception:
             pass
         st.markdown('</div>', unsafe_allow_html=True)
-
-    # History
     if show_history and st.session_state.history:
         st.markdown('<div class="sec-div"></div>', unsafe_allow_html=True)
         st.markdown('<div class="card-title">🕘 Recent Summaries</div>', unsafe_allow_html=True)
@@ -905,8 +806,6 @@ else:
             then click <b>Generate Summary</b>
         </div>
     </div>""", unsafe_allow_html=True)
-
-# ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style='text-align:center;margin-top:4rem;padding:2rem 0 1rem;border-top:1px solid #c8cde8;'>
     <div style='font-family:Syne,sans-serif;font-size:.68rem;font-weight:700;
