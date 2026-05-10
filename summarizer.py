@@ -105,7 +105,7 @@ _RE_DASH    = re.compile(r"^[-\u2013\u2014\u2022]")
 _RE_ACRONYM = re.compile(r"^([A-Z][a-z]+)\s+\(([A-Z]+)\)")
 _RE_HYPHEN  = re.compile(r"-\s+")
 _RE_WS      = re.compile(r"\s+")
-_RE_NONASCII= re.compile(r"[^\x00-\x7F]+")
+_RE_NONASCII= re.compile(r"[^\x00-\x7F\u0900-\u097F\u0600-\u06FF\u0B80-\u0BFF\u4E00-\u9FFF\u00C0-\u024F]+")
 _RE_REPWORD = re.compile(r"\b(\w+)( \1\b)+")
 _META_KW    = re.compile("|".join(re.escape(k) for k in [
     "uploaded by", "downloaded", "researchgate", "available online",
@@ -609,7 +609,7 @@ def clean_input(text: str, short_input: bool = False) -> str:
     text = " ".join(merged)
     text = _RE_HYPHEN.sub("", text)
     text = _RE_WS.sub(" ", text)
-    text = _RE_NONASCII.sub(" ", text)
+    text = re.sub(r"[^\x00-\x7F\u0900-\u097F\u0600-\u06FF\u0B80-\u0BFF\u4E00-\u9FFF\u00C0-\u024F]", " ", text)
     text = _RE_REPWORD.sub(r"\1", text)
     text = re.sub(r",([^\s\d])", r", \1", text)
     text = re.sub(r"\.([A-Za-z])", r". \1", text)
