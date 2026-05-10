@@ -661,7 +661,7 @@ if clr_btn:
     st.rerun()
 
 # ══════════════════════════════════════════════════════════════
-#  SUMMARIZATION PIPELINE
+#  SUMMARIZATION PIPELINE  ← ONLY THIS BLOCK WAS CHANGED
 # ══════════════════════════════════════════════════════════════
 if run_btn:
     if not input_text or not input_text.strip():
@@ -680,14 +680,17 @@ if run_btn:
                     prog.progress(10)
                     en_text, translated = translate_to_english(input_text, lang_code)
                     print(f"[DEBUG] en_text (first 300): {en_text[:300]}")
+
                     prog.progress(30)
-                    print(f"[DEBUG] en_text preview: {en_text[:200]}")
+                    # Normalize whitespace only — do NOT strip non-ASCII here;
+                    # en_text is already English after translation
+                    en_text_clean = re.sub(r'\s+', ' ', en_text).strip()
                     summary_en = generate_summary(
-                     en_text, tok, mod, model_choice, length_choice)
+                        en_text_clean, tok, mod, model_choice, length_choice)
                     print(f"[DEBUG] summary_en: {summary_en}")
 
                     prog.progress(88)
-                    if lang_choice != "English" and translated:
+                    if lang_choice != "English":
                         summary_native = translate_from_english(summary_en, lang_code)
                         summary        = summary_en
                         st.session_state.summary_native  = summary_native
@@ -709,7 +712,7 @@ if run_btn:
 
             st.session_state.last_summary     = summary
             st.session_state.last_input       = input_text
-            st.session_state.last_input_clean = clean_input(en_text)
+            st.session_state.last_input_clean = clean_input(en_text_clean)
             st.session_state.total_runs      += 1
             st.session_state.total_reduced   += pct
             st.session_state.history.insert(0, {
