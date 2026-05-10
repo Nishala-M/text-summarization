@@ -16,7 +16,7 @@ st.set_page_config(
     page_title="SummarAI — Intelligent Text Summarizer",
     page_icon="✦",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",
 )
 
 
@@ -299,7 +299,9 @@ section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;
     border:1px solid var(--border)!important;font-size:.85rem!important;color:var(--text)!important;}
 .streamlit-expanderContent{background:#fafbff!important;border:1px solid var(--border)!important;
     border-top:none!important;border-radius:0 0 10px 10px!important;}
-
+button[data-testid="collapsedControl"] {
+    display: none !important;
+}
 /* Download button */
 [data-testid="stDownloadButton"]>button{
     background:linear-gradient(135deg,#4f46e5,#6d64f5)!important;color:#ffffff!important;
@@ -679,7 +681,6 @@ if run_btn:
 
                     prog.progress(10)
                     en_text, translated = translate_to_english(input_text, lang_code)
-                    print(f"[DEBUG] en_text (first 300): {en_text[:300]}")
 
                     prog.progress(30)
                     # Normalize whitespace only — do NOT strip non-ASCII here;
@@ -687,7 +688,6 @@ if run_btn:
                     en_text_clean = re.sub(r'\s+', ' ', en_text).strip()
                     summary_en = generate_summary(
                         en_text_clean, tok, mod, model_choice, length_choice)
-                    print(f"[DEBUG] summary_en: {summary_en}")
 
                     prog.progress(88)
                     if lang_choice != "English":
