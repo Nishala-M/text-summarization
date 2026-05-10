@@ -289,37 +289,14 @@ section[data-testid="stSidebar"]{
     box-shadow:2px 0 16px rgba(79,70,229,.08)!important;}
 section[data-testid="stSidebar"] .block-container{padding:1.5rem 1rem!important;}
 
-/* Sidebar toggle — always visible, pinned to left edge */
+/* Sidebar toggle — force always visible using exact Streamlit 1.57 class */
 [data-testid="stSidebarCollapseButton"],
-[data-testid="stSidebarCollapseButton"] button {
-    display: flex !important;
+div.eelgd2m10,
+[class*="eelgd2m"] {
+    display: inline !important;
     visibility: visible !important;
     opacity: 1 !important;
     pointer-events: auto !important;
-}
-[data-testid="stSidebarCollapsed"] [data-testid="stSidebarCollapseButton"],
-[data-testid="stSidebarCollapsed"] [data-testid="stSidebarCollapseButton"] button {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    position: fixed !important;
-    top: 50% !important;
-    left: 0 !important;
-    z-index: 999999 !important;
-    background: #e8eaf6 !important;
-    border: 1px solid var(--border) !important;
-    border-left: none !important;
-    border-radius: 0 8px 8px 0 !important;
-    box-shadow: 2px 2px 8px rgba(79,70,229,.18) !important;
-    padding: 0.5rem 0.35rem !important;
-    cursor: pointer !important;
-}
-[data-testid="stSidebarCollapseButton"] svg {
-    color: var(--accent) !important;
-    fill: var(--accent) !important;
-    width: 1rem !important;
-    height: 1rem !important;
 }
 
 /* Progress */
