@@ -681,8 +681,10 @@ if run_btn:
                     en_text, translated = translate_to_english(input_text, lang_code)
 
                     prog.progress(30)
+                    print(f"[DEBUG] en_text preview: {en_text[:200]}")
                     summary_en = generate_summary(
-                        en_text, tok, mod, model_choice, length_choice)
+                     en_text, tok, mod, model_choice, length_choice)
+                    print(f"[DEBUG] summary_en: {summary_en}")
 
                     prog.progress(88)
                     if lang_choice != "English" and translated:
