@@ -87,10 +87,12 @@ MAX_SENTS_EXTRACTIVE = 300
 # ── Compiled regex ────────────────────────────────────────────────────────────
 _RE_REFSEC  = re.compile(
     r"^(references|bibliography|works cited|acknowledgment[s]?|"
-    r"acknowledgement[s]?|appendix|about the author[s]?)[\s:]*$", re.IGNORECASE)
+    r"acknowledgement[s]?|appendix|about the author[s]?|"
+    r"notes|footnotes?|declarations?)[\s:]*$", re.IGNORECASE)
 _RE_LABEL   = re.compile(
-    r"^(abstract|introduction|conclusion[s]?|summary|overview|background|"
-    r"methodology|methods|results|discussion|related work|future work)[:\s]+",
+    r"^(abstract|keywords?|introduction|conclusion[s]?|summary|overview|background|"
+    r"methodology|methods|results|discussion|related work|future work|"
+    r"references|acknowledgements?|appendix)[:\s]+",
     re.IGNORECASE)
 _RE_MONTH   = re.compile(
     r"\b(january|february|march|april|may|june|july|august|september|"
@@ -517,6 +519,7 @@ def is_research_paper(text: str) -> bool:
     ] if re.search(p, sample, re.IGNORECASE))
     return score >= 2
 def _is_academic_noise(s: str) -> bool:
+    if re.match(r'^\[\d+\]\s+[A-Z]', s.strip()): return True  # reference list entry
     if len(_RE_CITATION_INLINE.findall(s)) >= 2: return True
     if _RE_HYPHEN_INITIAL.search(s): return True
     if _RE_AUTHOR_CHAIN.search(s): return True
